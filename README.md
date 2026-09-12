@@ -146,23 +146,67 @@ npm run db:seed      # load fake example.com users with picks, for local testing
 The `backup` service snapshots the database on a schedule (`BACKUP_INTERVAL_SECONDS`, default daily)
 using `sqlite3 <path> ".backup '<dest>'"` — never a raw file copy, which can capture a torn snapshot of
 a live WAL-mode database. Uploading offsite is optional and uses [rclone](https://rclone.org/), which
-speaks Google Drive, Dropbox, S3, etc. through the same config:
+speaks Google Drive, Dropbox, S3, etc. through the same config. **`rclone` doesn't need to be installed
+anywhere** — the `backup` image already has it, so every command below runs it from there:
 
 ```bash
-# One-time setup, from anywhere with rclone installed:
-rclone config create gdrive drive          # or: rclone config create dropbox dropbox
-rclone config create backup-crypt crypt \
-  remote=gdrive:pigskinz-backups \
-  password="$(rclone obscure <a-passphrase-you-choose>)"
+docker compose build backup   # only needed once, so the image below exists
+```
 
-# Copy the resulting config into this repo (gitignored):
-cp ~/.config/rclone/rclone.conf ./secrets/rclone.conf
+**1. Authorize your cloud provider.** Drive/Dropbox/etc. need a one-time OAuth login, which wants a
+browser — awkward on a headless server. `rclone config create`'s wizard re-triggers that same browser
+flow even when a token is passed as a parameter, so on a headless box the reliable path is to authorize
+from a *different* device that has both `rclone` and a browser (a laptop, or a phone via
+[Termux](https://termux.dev/) on Android) and hand the server the resulting token — this is rclone's own
+[documented approach for headless setups](https://rclone.org/remote_setup/):
+
+```bash
+# On any OTHER device with rclone + a browser (not the server):
+rclone authorize "drive"          # or "dropbox", etc.
+```
+
+Log in and grant access; it prints a JSON token blob like
+`{"access_token":"...","token_type":"Bearer","refresh_token":"...","expiry":"..."}` — copy it.
+
+**2. Pick an encryption passphrase** for the `crypt` remote (below) and obscure it — this step needs no
+OAuth, so it runs fine directly on the server:
+
+```bash
+docker compose run --rm --entrypoint rclone backup obscure '<a-passphrase-you-choose>'
+```
+
+**3. Write `secrets/rclone.conf`** (gitignored) by hand, combining the token from step 1 and the
+obscured password from step 2:
+
+```ini
+[gdrive]
+type = drive
+scope = drive
+token = <paste the JSON token blob from step 1>
+
+[backup-crypt]
+type = crypt
+remote = gdrive:pigskinz-backups
+password = <paste the obscured output from step 2>
+```
+
+**4. Verify, then restart the sidecar:**
+
+```bash
+chmod 600 secrets/rclone.conf
+docker compose run --rm --entrypoint rclone backup --config /run/secrets/rclone.conf lsd gdrive:
+docker compose restart backup
+docker compose logs backup   # should end with "Backup complete: <timestamp>"
 ```
 
 Without `secrets/rclone.conf`, the backup service still takes local snapshots (in the container's
 `/tmp`, discarded on restart) but logs that there's nowhere to upload them — set this up before you
-need it. To restore: stop the `app` service, `rclone copy` the snapshot down, `gunzip` it, replace the
-file in the `pigskinz-data` volume, and start `app` back up.
+need it. Optionally set `HEALTHCHECK_URL` (a [healthchecks.io](https://healthchecks.io/) ping URL or
+similar) in `.env` and restart `backup` — it pings that URL after every successful run, so a monitoring
+service (not just this machine) notices if backups silently stop.
+
+To restore: stop the `app` service, `rclone copy` the snapshot down through `backup-crypt:` (decrypts
+it), `gunzip` it, replace the file in the `pigskinz-data` volume, and start `app` back up.
 
 ## Architecture notes
 
@@ -171,7 +215,7 @@ file in the `pigskinz-data` volume, and start `app` back up.
 | Web server | `server.ts` — a custom server (needed to intercept WebSocket upgrades before Next's own handler) |
 | Realtime (scores/picks/chat) | In-process WebSocket relay, `src/realtime/locker-room.ts` |
 | Scheduled jobs | `node-cron` in the same process, `src/cron/index.ts` (every 15 min) |
-| Database | SQLite (`better-sqlite3` + Drizzle), one file on a Docker volume |
+| Database | SQLite (`better-sqlite3` + Drizzle), one file on the `pigskinz-data` named volume — survives image rebuilds and container recreation, only removed by `docker compose down -v` |
 | Reverse proxy / TLS | Not bundled — bring your own (nginx-proxy-manager, Traefik, Caddy, etc.), see [Reverse proxy](#reverse-proxy) |
 
 See `CLAUDE.md` for the non-obvious constraints (why a custom server, why the cron loop is one process
