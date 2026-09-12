@@ -28,9 +28,15 @@ yarn-error.log*
 .env*.local
 .env
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local SQLite database + WAL files
+/data
+*.db
+*.db-shm
+*.db-wal
+
+secrets/*
+!secrets/.gitkeep

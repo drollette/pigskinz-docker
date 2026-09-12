@@ -1,0 +1,55 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_PATH: /data/pigskinz.db
+      ENVIRONMENT_NAME: ${ENVIRONMENT_NAME:-production}
+      SITE_URL: ${SITE_URL:-http://localhost:3000}
+      NEXT_PUBLIC_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      NEXT_PUBLIC_POOL_NAME: ${POOL_NAME:-Pigskinz}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-}
+      NEXT_PUBLIC_LEAGUESAFE_URL: ${LEAGUESAFE_URL:-}
+      NEXT_PUBLIC_BUYIN_AMOUNT: ${BUYIN_AMOUNT:-}
+      NEXT_PUBLIC_BUYIN_DEADLINE: ${BUYIN_DEADLINE:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      INVITATION_CODE: ${INVITATION_CODE:-}
+    volumes:
+      - pigskinz-data:/data
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - app
+
+  backup:
+    build: ./backup
+    restart: unless-stopped
+    environment:
+      DATABASE_PATH: /data/pigskinz.db
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-backup-crypt:pigskinz-backups}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-45}
+      HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
+    volumes:
+      - pigskinz-data:/data:ro
+      # Mounted as a directory (not a single file) so this works even before
+      # secrets/rclone.conf exists -- see README for the one-time `rclone
+      # config` setup. backup.sh skips the upload step (snapshot still
+      # taken) until that file shows up here.
+      - ./secrets:/run/secrets:ro
+
+volumes:
+  pigskinz-data:
+  caddy-data:
