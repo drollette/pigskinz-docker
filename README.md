@@ -31,6 +31,69 @@ npm install
 npm run dev          # http://localhost:3000, DATABASE_PATH defaults to ./data/pigskinz.db
 ```
 
+## Running on a home server
+
+This app was built with exactly this in mind — one machine that's on all the time (a spare PC, a
+Raspberry Pi 4/5, a NAS that can run Docker, etc.), no cloud account required.
+
+**1. Prerequisites on the server**
+
+- [Docker Engine and the Compose plugin](https://docs.docker.com/engine/install/) installed
+- `git` installed, or just copy the repo over some other way
+- Docker set to start on boot, so a power cut doesn't leave the pool down until someone notices:
+  `sudo systemctl enable docker` (the containers themselves already have `restart: unless-stopped`,
+  so once Docker is running they come back up on their own)
+
+**2. Get a domain name pointed at your home connection**
+
+Most home internet connections don't have a static public IP, so `SITE_DOMAIN` needs a **dynamic DNS**
+hostname rather than a domain you'd point with a normal A record: a free option like
+[DuckDNS](https://www.duckdns.org/) or [No-IP](https://www.noip.com/), or your router's built-in
+dynamic DNS client if it has one (most consumer routers do, under a name like "DDNS"). Either way, you
+end up with a hostname (e.g. `mypool.duckdns.org`) that keeps resolving to your home IP even when it
+changes.
+
+**3. Forward ports 80 and 443**
+
+In your router's settings, forward external ports 80 and 443 to the local IP address of the machine
+running Docker (both to the same ports). Caddy needs port 80 reachable from the internet to complete
+Let's Encrypt's certificate challenge, and 443 for the actual HTTPS traffic — without this, `SITE_DOMAIN`
+will never get a real certificate no matter how it's set.
+
+**4. Clone, configure, and start**
+
+```bash
+git clone https://github.com/<your-fork>/pigskinz-docker
+cd pigskinz-docker
+cp .env.example .env
+```
+
+Edit `.env`: at minimum set `SITE_URL`/`SITE_DOMAIN` to your dynamic DNS hostname (e.g.
+`https://mypool.duckdns.org` / `mypool.duckdns.org`), `INVITATION_CODE` to something only you share with
+people you want in the pool, and `SENDGRID_API_KEY` if you want email (verification, password reset,
+reminders) to work.
+
+```bash
+docker compose up -d --build
+docker compose logs -f      # watch startup; Ctrl-C to stop watching (containers keep running)
+```
+
+The first real request to your domain will take a few extra seconds while Caddy fetches its
+certificate. After that, `https://mypool.duckdns.org` should load the app from anywhere.
+
+**5. Keep it updated**
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+This rebuilds only what changed and restarts the affected containers; the database volume (and
+anything in `secrets/`) is untouched.
+
+**6. Set up backups before you need them** — see [Backups](#backups) below. A home server has no cloud
+provider quietly backing up a managed database for you the way Cloudflare D1 did; this step is on you.
+
 ## Environment variables
 
 See `.env.example` for the full list with explanations. Nothing in this repo ships with real secrets,
@@ -86,8 +149,7 @@ file in the `pigskinz-data` volume, and start `app` back up.
 | Reverse proxy / TLS | Caddy, automatic Let's Encrypt certificates |
 
 See `CLAUDE.md` for the non-obvious constraints (why a custom server, why the cron loop is one process
-instead of a real scheduler, the ESPN-sync relay this app is built to work with, etc.) — worth reading
-before making changes.
+instead of a real scheduler, how ESPN syncing works, etc.) — worth reading before making changes.
 
 ## Commands
 
