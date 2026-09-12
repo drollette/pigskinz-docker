@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-pr-title:
+    if: github.event_name == 'pull_request'
+    name: Lint PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title format
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const formatRegex = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(!)?:\s+.+$/i;
+            if (!formatRegex.test(title)) {
+              core.setFailed(
+                `PR title must follow Conventional Commits, e.g. "feat: add auto-pick strategy".\n\nYour title: "${title}"`
+              );
+            }
+
+  lint-commits:
+    if: github.event_name == 'pull_request'
+    name: Lint Commit Messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm install --save-dev @commitlint/cli @commitlint/config-conventional
+      - run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+
+  build:
+    name: Typecheck & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx next build
+        env:
+          # Placeholder values so the build doesn't depend on real secrets --
+          # nothing here needs to be a working credential to typecheck/build.
+          SITE_URL: http://localhost:3000
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+          DATABASE_PATH: /tmp/ci-build.db

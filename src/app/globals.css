@@ -1,0 +1,158 @@
+@import "tailwindcss";
+/* "class" (opt-in via form-input/form-checkbox/etc., none of which this
+   app uses) instead of the default "base" strategy, which globally resets
+   every native <input>/<select>/<textarea> -- including daisyUI's own
+   checkbox/toggle/radio components, which are that same bare element with
+   a daisyUI class added, not a separate one. The conflict was visible:
+   this plugin's base strategy paints a white checkmark background-image
+   directly onto every `input[type=checkbox]:checked`, which bled out from
+   behind daisyUI's `.toggle` thumb since daisyUI's own :checked rule never
+   clears it. daisyUI already fully themes every form element used in this
+   app, so the global reset was pure conflict, no benefit. */
+@plugin "@tailwindcss/forms" {
+  strategy: "class";
+}
+@plugin "@tailwindcss/typography";
+@plugin "daisyui";
+@plugin "daisyui/theme" {
+  name: "pigskinz";
+  default: true;
+  color-scheme: light;
+
+  --radius-box: 0.5rem;
+  --radius-field: 0.375rem;
+  /* daisyUI v5 shrank .btn/.input/.select/.checkbox/.radio/.toggle from
+     v4's default 48px tall to 40px (both are 10x this multiplier's 4px
+     base unit -- v4 effectively used 4.8px, v5 defaults to 4px). Restoring
+     the taller v4 sizing here since 40px falls short of a real touch
+     target on mobile. */
+  --size-field: 0.3rem;
+  --size-selector: 0.3rem;
+
+  --color-primary: #1e40af;
+  --color-primary-content: #ffffff;
+  --color-secondary: #475569;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0369a1;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1f2937;
+  --color-neutral-content: #f3f4f6;
+  --color-base-100: #ffffff;
+  --color-base-200: #f8fafc;
+  --color-base-300: #e2e8f0;
+  --color-base-content: #1e293b;
+  --color-info: #0ea5e9;
+  --color-info-content: #ffffff;
+  --color-success: #16a34a;
+  --color-success-content: #ffffff;
+  --color-warning: #d97706;
+  --color-warning-content: #ffffff;
+  --color-error: #dc2626;
+  --color-error-content: #ffffff;
+}
+@plugin "daisyui/theme" {
+  name: "pigskinz-dark";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --radius-box: 0.5rem;
+  --radius-field: 0.375rem;
+  /* See the light theme's --size-field/--size-selector comment above. */
+  --size-field: 0.3rem;
+  --size-selector: 0.3rem;
+
+  --color-primary: #3b82f6;
+  --color-primary-content: #ffffff;
+  --color-secondary: #64748b;
+  --color-secondary-content: #ffffff;
+  --color-accent: #0ea5e9;
+  --color-accent-content: #ffffff;
+  --color-neutral: #1e293b;
+  --color-neutral-content: #e2e8f0;
+  --color-base-100: #0f172a;
+  --color-base-200: #1e293b;
+  --color-base-300: #334155;
+  --color-base-content: #e2e8f0;
+  --color-info: #38bdf8;
+  --color-info-content: #0f172a;
+  --color-success: #22c55e;
+  --color-success-content: #0f172a;
+  --color-warning: #f59e0b;
+  --color-warning-content: #0f172a;
+  --color-error: #ef4444;
+  --color-error-content: #ffffff;
+}
+
+/* Next.js App Router's built-in post-navigation scroll handler (see
+   getScrollTargetState in next/dist/client/components/layout-router.js)
+   treats a target element as "already visible" once its top edge is
+   anywhere between `scroll-padding-top` and the viewport's bottom edge --
+   it deliberately skips the sticky nav itself as a candidate target
+   (shouldSkipElement excludes fixed/sticky elements) but has no way to
+   know the nav still covers that same top strip of the viewport for
+   everything else. Left at the browser default of 0, this meant a page
+   whose newly-navigated-to content happened to land with its top edge
+   just barely inside the viewport (behind the sticky nav) was treated as
+   "no scroll needed," leaving it clipped under the nav until the user
+   manually scrolled. Setting this to the nav's own rendered height tells
+   that same built-in logic to also require clearing the nav, matching
+   ScrollableColumn's independently-hand-tuned "~5rem nav + 1rem main
+   padding" offset used for the column height clamp. */
+html {
+  scroll-padding-top: 6rem;
+}
+
+body {
+  font-family: var(--font-radio-canada-big), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-black-ops-one), system-ui, sans-serif;
+  /* Black Ops One only ships a 400 weight — any bolder weight (e.g. from a
+     Tailwind font-bold utility on a heading) gets browser-synthesized,
+     which thickens the strokes and washes out the font's stencil-cut look. */
+  font-weight: 400 !important;
+}
+
+h1, h2 {
+  text-transform: uppercase;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-base-200);
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+}
+
+/* Professional card styling */
+.card {
+  @apply border border-base-300 shadow-sm;
+}
+
+/* DaisyUI's default card padding (2rem/side) eats a quarter of a phone
+   screen's width before any content renders. Tighten it below the sm
+   breakpoint; card-md/lg still opt in to the roomier default. */
+@media (max-width: 639px) {
+  .card-body {
+    padding: 1rem;
+  }
+}
+
+/* Clean button focus states */
+button:focus-visible {
+  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-base-100;
+}
