@@ -17,22 +17,8 @@ services:
       INVITATION_CODE: ${INVITATION_CODE:-}
     volumes:
       - pigskinz-data:/data
-    expose:
-      - "3000"
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-    depends_on:
-      - app
+      - "${APP_PORT:-3000}:3000"
 
   backup:
     build: ./backup
@@ -52,4 +38,3 @@ services:
 
 volumes:
   pigskinz-data:
-  caddy-data:

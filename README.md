@@ -14,17 +14,18 @@ cp .env.example .env   # fill in real values
 docker compose up -d --build
 ```
 
-This starts three services:
+This starts two services:
 
-- **app** — the Next.js server (internal port 3000)
-- **caddy** — reverse proxy + automatic TLS (needs `SITE_DOMAIN` set to a real, publicly resolvable
-  domain to actually get a certificate; defaults to `localhost` for local testing)
+- **app** — the Next.js server, published on the host at `APP_PORT` (default `3000`)
 - **backup** — a sidecar that snapshots the database on a schedule (see [Backups](#backups))
+
+There's no reverse proxy or TLS termination in this repo — see [Reverse proxy](#reverse-proxy) below
+for putting it behind one.
 
 The database schema is created automatically on first start (`scripts/migrate.mjs` runs before the
 server starts, every time — it's idempotent).
 
-For local development without Caddy/TLS, run the app directly:
+For local development, run the app directly instead:
 
 ```bash
 npm install
@@ -46,19 +47,18 @@ Raspberry Pi 4/5, a NAS that can run Docker, etc.), no cloud account required.
 
 **2. Get a domain name pointed at your home connection**
 
-Most home internet connections don't have a static public IP, so `SITE_DOMAIN` needs a **dynamic DNS**
+Most home internet connections don't have a static public IP, so you'll want a **dynamic DNS**
 hostname rather than a domain you'd point with a normal A record: a free option like
 [DuckDNS](https://www.duckdns.org/) or [No-IP](https://www.noip.com/), or your router's built-in
 dynamic DNS client if it has one (most consumer routers do, under a name like "DDNS"). Either way, you
 end up with a hostname (e.g. `mypool.duckdns.org`) that keeps resolving to your home IP even when it
-changes.
+changes. This is what you'll give your reverse proxy in step 3, and what `SITE_URL` should be set to.
 
-**3. Forward ports 80 and 443**
+**3. Put it behind a reverse proxy**
 
-In your router's settings, forward external ports 80 and 443 to the local IP address of the machine
-running Docker (both to the same ports). Caddy needs port 80 reachable from the internet to complete
-Let's Encrypt's certificate challenge, and 443 for the actual HTTPS traffic — without this, `SITE_DOMAIN`
-will never get a real certificate no matter how it's set.
+This repo doesn't run one itself — bring whatever you already have, or set one up if you don't. See
+[Reverse proxy](#reverse-proxy) below for the setup either way; you need it done before step 4's
+`docker compose up` will be reachable from the internet over HTTPS.
 
 **4. Clone, configure, and start**
 
@@ -68,18 +68,17 @@ cd pigskinz-docker
 cp .env.example .env
 ```
 
-Edit `.env`: at minimum set `SITE_URL`/`SITE_DOMAIN` to your dynamic DNS hostname (e.g.
-`https://mypool.duckdns.org` / `mypool.duckdns.org`), `INVITATION_CODE` to something only you share with
-people you want in the pool, and `SENDGRID_API_KEY` if you want email (verification, password reset,
-reminders) to work.
+Edit `.env`: at minimum set `SITE_URL` to your dynamic DNS hostname (e.g. `https://mypool.duckdns.org`),
+`INVITATION_CODE` to something only you share with people you want in the pool, and `SENDGRID_API_KEY`
+if you want email (verification, password reset, reminders) to work.
 
 ```bash
 docker compose up -d --build
 docker compose logs -f      # watch startup; Ctrl-C to stop watching (containers keep running)
 ```
 
-The first real request to your domain will take a few extra seconds while Caddy fetches its
-certificate. After that, `https://mypool.duckdns.org` should load the app from anywhere.
+Once your reverse proxy is pointed at this container (step 3), `https://mypool.duckdns.org` should load
+the app from anywhere.
 
 **5. Keep it updated**
 
@@ -94,14 +93,41 @@ anything in `secrets/`) is untouched.
 **6. Set up backups before you need them** — see [Backups](#backups) below. A home server has no cloud
 provider quietly backing up a managed database for you the way Cloudflare D1 did; this step is on you.
 
+## Reverse proxy
+
+The `app` container listens on 3000 and is published to the host at `APP_PORT` (default `3000`, set in
+`.env`) — that's the only thing any reverse proxy needs to reach: `http://<host-ip>:APP_PORT`. TLS
+termination, certificates, and public routing are entirely up to whatever proxy you point at it; this
+repo intentionally doesn't bundle one, since most people running a home server already have one for
+their other services. Two things matter for whichever proxy you use:
+
+- **WebSocket upgrades must be forwarded** on every path, not just `/api/ws` — live scores/picks/chat
+  depend on it. Most reverse proxies forward WebSocket upgrades by default on HTTP/1.1; if picks/chat
+  don't update live, check that setting first.
+- **Forward the real client IP/host** (`X-Forwarded-For`, `X-Forwarded-Proto`, `Host`) so the app's
+  `SITE_URL` and any host-based logic line up with what the browser actually requested.
+
+**Using [nginx-proxy-manager](https://nginxproxymanager.com/):** add a Proxy Host with your domain
+(e.g. `mypool.duckdns.org`) as the domain name, `<host-ip>` as "Forward Hostname / IP" (use the Docker
+host's LAN IP, or the `app` container's name if nginx-proxy-manager shares this compose network) and
+`APP_PORT` (default `3000`) as "Forward Port", enable **Websockets Support** under the Details tab, and
+request a Let's Encrypt certificate under the SSL tab with **Force SSL** on.
+
+**Using Traefik, Caddy, or another proxy you already run:** the same three things apply — proxy to
+`<host-ip>:APP_PORT`, forward WebSocket upgrades, request/terminate TLS for your domain there.
+
+**No reverse proxy yet:** for a pool you're only using on your home network, you can skip this
+entirely and just browse to `http://<host-ip>:APP_PORT` directly — no public domain or TLS needed. You
+only need step 3 if you want people outside your network (or on `https://`) to reach the pool.
+
 ## Environment variables
 
 See `.env.example` for the full list with explanations. Nothing in this repo ships with real secrets,
 a real domain, or any one operator's personal or financial details — every value is a placeholder you
 replace.
 
-At minimum for a working deployment: `SITE_URL`/`SITE_DOMAIN`, `SENDGRID_API_KEY` (or email sending
-just fails — picks/login still work), and `INVITATION_CODE`.
+At minimum for a working deployment: `SITE_URL`, `SENDGRID_API_KEY` (or email sending just fails —
+picks/login still work), and `INVITATION_CODE`.
 
 ## Database
 
@@ -146,7 +172,7 @@ file in the `pigskinz-data` volume, and start `app` back up.
 | Realtime (scores/picks/chat) | In-process WebSocket relay, `src/realtime/locker-room.ts` |
 | Scheduled jobs | `node-cron` in the same process, `src/cron/index.ts` (every 15 min) |
 | Database | SQLite (`better-sqlite3` + Drizzle), one file on a Docker volume |
-| Reverse proxy / TLS | Caddy, automatic Let's Encrypt certificates |
+| Reverse proxy / TLS | Not bundled — bring your own (nginx-proxy-manager, Traefik, Caddy, etc.), see [Reverse proxy](#reverse-proxy) |
 
 See `CLAUDE.md` for the non-obvious constraints (why a custom server, why the cron loop is one process
 instead of a real scheduler, how ESPN syncing works, etc.) — worth reading before making changes.

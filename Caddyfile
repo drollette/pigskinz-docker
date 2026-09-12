@@ -1,7 +1,0 @@
-# Set SITE_DOMAIN in your .env (see .env.example) -- Caddy fetches a
-# Let's Encrypt certificate for it automatically. Defaults to localhost with
-# no real TLS, fine for a first local smoke test but not for anything
-# reachable over the internet.
-{$SITE_DOMAIN:localhost} {
-	reverse_proxy app:3000
-}
