@@ -1,5 +1,10 @@
 services:
   app:
+    # Both image and build set: `docker compose up -d` pulls the published
+    # image (fast, no local build needed -- amd64 + arm64, see
+    # .github/workflows/docker-publish.yml); `docker compose up -d --build`
+    # builds from this checkout instead, e.g. if you've changed app code.
+    image: ghcr.io/drollette/pigskinz-docker:${IMAGE_TAG:-main}
     build: .
     restart: unless-stopped
     environment:
