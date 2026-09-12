@@ -99,7 +99,8 @@ npm, not pnpm. `package-lock.json` is the real lockfile.
 npm run dev                     # local dev server (custom server + cron + WS via tsx)
 npx tsc --noEmit                 # typecheck (do this before every commit)
 npx next build                   # production build (also catches type errors dev mode won't)
-docker compose up -d --build     # full stack: app + backup sidecar (bring your own reverse proxy)
+docker compose up -d --build     # full stack from source: app + backup sidecar (bring your own reverse proxy)
+docker compose up -d             # same, but pulls app's published image (ghcr.io/drollette/pigskinz-docker) instead of building it
 ```
 
 No automated test suite and no ESLint config committed. Verification is `tsc --noEmit` + `next build` +

@@ -11,8 +11,14 @@ Runs as a single container: Next.js, an in-process WebSocket relay (live scores/
 
 ```bash
 cp .env.example .env   # fill in real values
-docker compose up -d --build
+docker compose up -d       # pulls the published image -- no local build needed
 ```
+
+`app` also builds from this checkout: use `docker compose up -d --build` instead if you've changed app
+code, or aren't on `linux/amd64`/`linux/arm64` (the two platforms the published image covers). The
+published image is `ghcr.io/drollette/pigskinz-docker`, built by
+[`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) on every push to `main`;
+`IMAGE_TAG` in `.env` picks which tag `docker compose up -d` pulls (`main` by default).
 
 This starts two services:
 
@@ -73,7 +79,7 @@ Edit `.env`: at minimum set `SITE_URL` to your dynamic DNS hostname (e.g. `https
 if you want email (verification, password reset, reminders) to work.
 
 ```bash
-docker compose up -d --build
+docker compose up -d       # pulls the published image; add --build to build from source instead
 docker compose logs -f      # watch startup; Ctrl-C to stop watching (containers keep running)
 ```
 
@@ -84,11 +90,13 @@ the app from anywhere.
 
 ```bash
 git pull
-docker compose up -d --build
+docker compose pull   # fetch the latest published image
+docker compose up -d
 ```
 
-This rebuilds only what changed and restarts the affected containers; the database volume (and
-anything in `secrets/`) is untouched.
+(Or `docker compose up -d --build` instead of `pull`, if you're building from source.) This only
+recreates the containers whose image actually changed; the database volume (and anything in `secrets/`)
+is untouched.
 
 **6. Set up backups before you need them** — see [Backups](#backups) below. A home server has no cloud
 provider quietly backing up a managed database for you the way Cloudflare D1 did; this step is on you.
