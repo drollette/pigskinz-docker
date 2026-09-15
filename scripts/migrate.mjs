@@ -5,13 +5,20 @@
 // container startup (see Dockerfile/docker-compose.yml) and safe to re-run.
 
 import Database from "better-sqlite3";
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, "..", "drizzle");
 const dbPath = process.env.DATABASE_PATH ?? "./data/pigskinz.db";
+
+// The Docker volume mount always exists as a directory, but a fresh local
+// checkout's ./data doesn't -- better-sqlite3 refuses to create the file
+// otherwise ("Cannot open database because the directory does not exist").
+// Same fix as src/db/index.ts, needed here too since this runs as its own
+// process before the app ever starts (see Dockerfile's CMD).
+mkdirSync(dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
