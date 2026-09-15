@@ -32,7 +32,7 @@ rclone delete "$REMOTE/" --min-age "${RETENTION_DAYS}d" $RCLONE_ARGS || true
 rm -f "${TMP}.gz"
 
 if [ -n "${HEALTHCHECK_URL:-}" ]; then
-  curl -fsS -m 10 "$HEALTHCHECK_URL" || true
+  curl -fsS -m 10 "$HEALTHCHECK_URL" && echo || true
 fi
 
 echo "Backup complete: ${STAMP}"

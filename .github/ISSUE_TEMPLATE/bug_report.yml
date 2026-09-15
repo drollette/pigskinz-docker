@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in the self-hosted app or its Docker setup isn't working right
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running this?
+      options:
+        - docker compose (production, behind a reverse proxy)
+        - docker compose (local/LAN only, no reverse proxy)
+        - npm run dev (local development)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: Output of `git log -1 --oneline`, or the image tag if you're not building from source
+      placeholder: e.g. c19d15c or ghcr.io/drollette/pigskinz-docker:main
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Redact anything sensitive first (domains, emails, tokens). Useful commands:
+        `docker compose logs app --tail 100`, `docker compose logs backup --tail 50`
+      render: shell
+    validations:
+      required: false
