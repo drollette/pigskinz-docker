@@ -10,6 +10,7 @@ interface EmailNotificationsFormProps {
   initialPickReminders: boolean;
   initialAutoPickDigest: boolean;
   initialLockerRoomMentions: boolean;
+  initialWeekResults: boolean;
 }
 
 export function EmailNotificationsForm({
@@ -18,25 +19,29 @@ export function EmailNotificationsForm({
   initialPickReminders,
   initialAutoPickDigest,
   initialLockerRoomMentions,
+  initialWeekResults,
 }: EmailNotificationsFormProps) {
   const [enabled, setEnabled] = useState(initialEnabled);
   const [pickReminders, setPickReminders] = useState(initialPickReminders);
   const [autoPickDigest, setAutoPickDigest] = useState(initialAutoPickDigest);
   const [lockerRoomMentions, setLockerRoomMentions] = useState(initialLockerRoomMentions);
+  const [weekResults, setWeekResults] = useState(initialWeekResults);
   const [isPending, startTransition] = useTransition();
 
   const save = (
     newEnabled: boolean,
     newPickReminders: boolean,
     newAutoPickDigest: boolean,
-    newLockerRoomMentions: boolean
+    newLockerRoomMentions: boolean,
+    newWeekResults: boolean
   ) => {
     startTransition(async () => {
       const result = await updateEmailNotificationsAction(
         newEnabled,
         newPickReminders,
         newAutoPickDigest,
-        newLockerRoomMentions
+        newLockerRoomMentions,
+        newWeekResults
       );
       if ("error" in result) {
         toast.error(result.error);
@@ -44,6 +49,7 @@ export function EmailNotificationsForm({
         setPickReminders(pickReminders);
         setAutoPickDigest(autoPickDigest);
         setLockerRoomMentions(lockerRoomMentions);
+        setWeekResults(weekResults);
       } else {
         toast.success("Email preferences saved");
       }
@@ -66,7 +72,7 @@ export function EmailNotificationsForm({
           checked={enabled}
           onChange={(e) => {
             setEnabled(e.target.checked);
-            save(e.target.checked, pickReminders, autoPickDigest, lockerRoomMentions);
+            save(e.target.checked, pickReminders, autoPickDigest, lockerRoomMentions, weekResults);
           }}
           disabled={isPending}
         />
@@ -89,7 +95,7 @@ export function EmailNotificationsForm({
           checked={pickReminders}
           onChange={(e) => {
             setPickReminders(e.target.checked);
-            save(enabled, e.target.checked, autoPickDigest, lockerRoomMentions);
+            save(enabled, e.target.checked, autoPickDigest, lockerRoomMentions, weekResults);
           }}
           disabled={isPending || !enabled}
         />
@@ -111,7 +117,28 @@ export function EmailNotificationsForm({
           checked={autoPickDigest}
           onChange={(e) => {
             setAutoPickDigest(e.target.checked);
-            save(enabled, pickReminders, e.target.checked, lockerRoomMentions);
+            save(enabled, pickReminders, e.target.checked, lockerRoomMentions, weekResults);
+          }}
+          disabled={isPending || !enabled}
+        />
+      </label>
+
+      <label
+        className={`flex items-center justify-between gap-4 ${enabled ? "cursor-pointer" : "opacity-50"}`}
+      >
+        <div>
+          <div className="font-medium">Week results</div>
+          <div className="text-sm text-base-content/60">
+            An email with each week&apos;s standings once all of that week&apos;s games are final.
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          className="toggle toggle-primary shrink-0"
+          checked={weekResults}
+          onChange={(e) => {
+            setWeekResults(e.target.checked);
+            save(enabled, pickReminders, autoPickDigest, lockerRoomMentions, e.target.checked);
           }}
           disabled={isPending || !enabled}
         />
@@ -134,7 +161,7 @@ export function EmailNotificationsForm({
             checked={lockerRoomMentions}
             onChange={(e) => {
               setLockerRoomMentions(e.target.checked);
-              save(enabled, pickReminders, autoPickDigest, e.target.checked);
+              save(enabled, pickReminders, autoPickDigest, e.target.checked, weekResults);
             }}
             disabled={isPending || !enabled}
           />

@@ -74,11 +74,12 @@ export function SeasonStandingsTable({
               </td>
               <td className="text-center hidden @sm:table-cell">
                 <div className="font-medium">{player.correctPicks}</div>
-                {/* Same denominator as the Points % above -- graded
-                    (decided) games only, not every pick placed -- so
-                    the two numbers never look inconsistent. */}
+                {/* Same denominator as the Points % above -- every game
+                    graded this season, not just the ones this player
+                    actually picked, so skipping a pick can't inflate their
+                    percentage the way dividing by their own pick count did. */}
                 <div className="text-xs text-base-content/50">
-                  of {player.correctPicks + player.incorrectPicks}
+                  of {player.totalGradedGames}
                 </div>
               </td>
               <td className="text-center hidden @lg:table-cell">{player.weeksPlayed}</td>

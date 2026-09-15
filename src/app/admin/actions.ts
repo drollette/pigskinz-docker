@@ -16,6 +16,17 @@ type ActionResult = { success: true } | { error: string };
 // RichTextEditor), which lets the admin paste in arbitrary clipboard HTML —
 // this allowlist strips that down to the handful of tags the toolbar
 // actually produces before it's ever stored or rendered back to users.
+//
+// "div" is in here even though the toolbar has no div button: Chrome (and
+// Chromium-based mobile browsers) wrap each line in a plain contentEditable
+// editor in its own <div> on Enter, rather than <p> -- this editor never
+// calls `document.execCommand("defaultParagraphSeparator", false, "p")` to
+// override that. Without "div" allowed, sanitize-html's default behavior
+// for a disallowed tag is to drop the tag but keep its text content, which
+// silently deleted every line break: "Line one</div><div>Line two" became
+// "Line oneLine two" with nothing between them once the divs were gone.
+// Confirmed against a real submitted message that showed exactly that
+// symptom in the sent email while looking correct in the editor itself.
 const HOME_MESSAGE_ALLOWED_TAGS = [
   "b",
   "strong",
@@ -28,6 +39,7 @@ const HOME_MESSAGE_ALLOWED_TAGS = [
   "a",
   "br",
   "p",
+  "div",
 ];
 
 export async function updateHomeMessageAction(message: string): Promise<ActionResult> {
@@ -66,6 +78,61 @@ export async function updateHomeMessageAction(message: string): Promise<ActionRe
     console.error("Update home message error:", error);
     return {
       error: error instanceof Error ? error.message : "Failed to update home message",
+    };
+  }
+}
+
+/**
+ * The source template for the automated week-results email (see
+ * src/lib/week-results-email.ts, which reads these same two columns
+ * directly off site_settings). Clearing the subject or body doesn't
+ * "hide" anything the way an empty home message does -- the sender just
+ * skips a week entirely while either is unset, same as if the feature had
+ * never been configured.
+ */
+export async function updateWeekResultsEmailTemplateAction(
+  subject: string,
+  bodyHtml: string
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  const trimmedSubject = subject.trim();
+  const sanitizedBody = sanitizeHtml(bodyHtml, {
+    allowedTags: HOME_MESSAGE_ALLOWED_TAGS,
+    allowedAttributes: { a: ["href"] },
+    allowedSchemes: ["http", "https", "mailto"],
+    transformTags: {
+      a: sanitizeHtml.simpleTransform("a", {
+        target: "_blank",
+        rel: "noopener noreferrer",
+      }),
+    },
+  }).trim();
+
+  const hasVisibleText = sanitizedBody.replace(/<[^>]*>/g, "").trim().length > 0;
+  const weekResultsEmailSubject = trimmedSubject.length > 0 ? trimmedSubject : null;
+  const weekResultsEmailBody = hasVisibleText ? sanitizedBody : null;
+
+  const db = getDb();
+
+  try {
+    await db
+      .insert(siteSettings)
+      .values({
+        id: SITE_SETTINGS_ID,
+        weekResultsEmailSubject,
+        weekResultsEmailBody,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: siteSettings.id,
+        set: { weekResultsEmailSubject, weekResultsEmailBody, updatedAt: new Date() },
+      });
+    return { success: true };
+  } catch (error) {
+    console.error("Update week results email template error:", error);
+    return {
+      error: error instanceof Error ? error.message : "Failed to update week results email template",
     };
   }
 }

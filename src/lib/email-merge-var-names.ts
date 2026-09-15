@@ -22,6 +22,16 @@ export const MERGE_VARIABLE_NAMES = [
   "current_week_tiebreaker_week",
   "current_week_tiebreaker_url",
   "user_tiebreaker_prediction",
+  // The most recently fully-graded week (or, when the automated
+  // week-results sender resolves these itself, the exact week that just
+  // completed -- see src/lib/week-results.ts). Empty string when nobody
+  // placed 3rd / nobody submitted a tiebreaker guess that week, rather than
+  // some placeholder text a template would have to work around.
+  "week_results_week",
+  "week_results_first_place",
+  "week_results_second_place",
+  "week_results_third_place",
+  "week_results_tiebreaker_winners",
 ] as const;
 
 export type MergeVariableName = (typeof MERGE_VARIABLE_NAMES)[number];

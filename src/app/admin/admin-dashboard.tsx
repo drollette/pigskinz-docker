@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { triggerSyncNowAction, triggerResetSeasonAction } from "./actions";
 import { HomeMessageForm } from "./home-message-form";
+import { WeekResultsEmailForm } from "./week-results-email-form";
 import { AdminEmailForm } from "./admin-email-form";
 import { EmailTemplateManager, type EmailTemplateData } from "./email-template-manager";
 import { MissingPicksPanel } from "./missing-picks-panel";
@@ -50,6 +51,8 @@ interface AdminDashboardProps {
   users: UserData[];
   environmentName: "staging" | "production";
   homeMessage: string;
+  weekResultsEmailSubject: string;
+  weekResultsEmailBody: string;
   nextGameMissingPicks: NextGameMissingPicks | null;
   missingTiebreaker: CurrentWeekMissingTiebreaker | null;
   emailTemplates: EmailTemplateData[];
@@ -60,6 +63,8 @@ export function AdminDashboard({
   users: initialUsers,
   environmentName,
   homeMessage,
+  weekResultsEmailSubject,
+  weekResultsEmailBody,
   nextGameMissingPicks,
   missingTiebreaker,
   emailTemplates: initialEmailTemplates,
@@ -256,6 +261,15 @@ export function AdminDashboard({
           Plain text shown to everyone near the top of the Home page. Leave blank to hide it.
         </p>
         <HomeMessageForm initialMessage={homeMessage} />
+      </section>
+
+      {/* Week Results Email */}
+      <section>
+        <h2 className="text-xl font-semibold mb-4">Week Results Email</h2>
+        <WeekResultsEmailForm
+          initialSubject={weekResultsEmailSubject}
+          initialBody={weekResultsEmailBody}
+        />
       </section>
 
       {/* Missing Picks */}

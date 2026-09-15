@@ -7,8 +7,12 @@
 // Run with: npm run db:seed
 
 import Database from "better-sqlite3";
+import { mkdirSync } from "fs";
+import { dirname } from "path";
 
 const dbPath = process.env.DATABASE_PATH ?? "./data/pigskinz.db";
+// Same fix as scripts/migrate.mjs -- see its comment.
+mkdirSync(dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 
 const users = [

@@ -759,7 +759,7 @@ export async function sendLockerRoomNotificationEmail(
 function htmlToPlainText(html: string): string {
   return html
     .replace(/<li[^>]*>/gi, "- ")
-    .replace(/<\/(p|li|ul|ol)>/gi, "\n")
+    .replace(/<\/(p|li|ul|ol|div)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
