@@ -77,6 +77,7 @@ export default async function SettingsPage() {
               initialPickReminders={preferences.emailNotifications?.pickReminders ?? true}
               initialAutoPickDigest={preferences.emailNotifications?.autoPickDigest ?? true}
               initialLockerRoomMentions={preferences.emailNotifications?.lockerRoomMentions ?? true}
+              initialWeekResults={preferences.emailNotifications?.weekResults ?? true}
             />
           </CardBody>
         </Card>

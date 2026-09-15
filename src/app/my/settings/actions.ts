@@ -407,6 +407,7 @@ const emailNotificationsSchema = z.object({
   pickReminders: z.boolean(),
   autoPickDigest: z.boolean(),
   lockerRoomMentions: z.boolean(),
+  weekResults: z.boolean(),
 });
 
 type UpdateEmailNotificationsResult = { error: string } | { success: true };
@@ -415,7 +416,8 @@ export async function updateEmailNotificationsAction(
   enabled: boolean,
   pickReminders: boolean,
   autoPickDigest: boolean,
-  lockerRoomMentions: boolean
+  lockerRoomMentions: boolean,
+  weekResults: boolean
 ): Promise<UpdateEmailNotificationsResult> {
   const user = await requireAuth();
 
@@ -424,6 +426,7 @@ export async function updateEmailNotificationsAction(
     pickReminders,
     autoPickDigest,
     lockerRoomMentions,
+    weekResults,
   });
   if (!parsed.success) {
     return { error: "Invalid email notification settings" };

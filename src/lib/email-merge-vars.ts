@@ -12,6 +12,7 @@ import { formatKickoff } from "@/lib/email";
 import { getSeasonTypeName } from "@/lib/utils";
 import { MERGE_VARIABLE_NAMES, type MergeVariableName } from "@/lib/email-merge-var-names";
 import { SITE_URL } from "@/lib/site-config";
+import { getWeekResultsSummary, getMostRecentlyCompletedWeek } from "@/lib/week-results";
 
 export type MergeVariables = Record<MergeVariableName, string>;
 
@@ -38,7 +39,7 @@ export async function getMergeVariablesForUsers(
   const result = new Map<string, MergeVariables>();
   if (userIds.length === 0) return result;
 
-  const [recipients, nextGame, weekInfo, totalPlayersRow] = await Promise.all([
+  const [recipients, nextGame, weekInfo, totalPlayersRow, mostRecentCompletedWeek] = await Promise.all([
     db
       .select({ id: users.id, name: users.name, username: users.username })
       .from(users)
@@ -49,7 +50,12 @@ export async function getMergeVariablesForUsers(
       .select({ count: sql<number>`count(*)` })
       .from(users)
       .where(and(eq(users.emailVerified, true), eq(users.isActive, true))),
+    getMostRecentlyCompletedWeek(db),
   ]);
+
+  const weekResults = mostRecentCompletedWeek
+    ? await getWeekResultsSummary(db, mostRecentCompletedWeek.seasonType, mostRecentCompletedWeek.weekNumber)
+    : null;
 
   const nextGameLabel = nextGame ? nextGame.shortName || nextGame.name : "your next game";
   const nextGameStartTime = nextGame ? formatKickoff(nextGame.date) : "TBD";
@@ -112,6 +118,11 @@ export async function getMergeVariablesForUsers(
         tiebreakerPrediction !== null && tiebreakerPrediction !== undefined
           ? String(tiebreakerPrediction)
           : "not yet submitted",
+      week_results_week: weekResults?.week ?? "",
+      week_results_first_place: weekResults?.firstPlace ?? "",
+      week_results_second_place: weekResults?.secondPlace ?? "",
+      week_results_third_place: weekResults?.thirdPlace ?? "",
+      week_results_tiebreaker_winners: weekResults?.tiebreakerWinners ?? "",
     });
   }
 

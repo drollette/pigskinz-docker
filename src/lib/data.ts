@@ -32,6 +32,24 @@ export async function getHomeMessage(): Promise<string | null> {
   return result[0]?.homeMessage ?? null;
 }
 
+/** The admin-editable subject/body template the automated week-results
+ * email (src/lib/week-results-email.ts) sends from -- either can be unset,
+ * in which case that sender just skips sending until an admin sets both. */
+export async function getWeekResultsEmailTemplate(): Promise<{ subject: string; body: string } | null> {
+  const db = getDb();
+  const result = await db
+    .select({
+      subject: siteSettings.weekResultsEmailSubject,
+      body: siteSettings.weekResultsEmailBody,
+    })
+    .from(siteSettings)
+    .where(eq(siteSettings.id, SITE_SETTINGS_ID))
+    .limit(1);
+  const row = result[0];
+  if (!row?.subject || !row?.body) return null;
+  return { subject: row.subject, body: row.body };
+}
+
 export interface MissingPickUser {
   id: string;
   name: string;
@@ -862,7 +880,7 @@ export async function getOverallStandings(seasonType: number) {
   // rather than per-user, since points now require cross-user comparison
   // (the closest-tiebreaker bonus needs each week's minimum distance across
   // everyone, not just one user at a time).
-  const [allUserPicks, allSummaries] = await Promise.all([
+  const [allUserPicks, allSummaries, gradedGamesByWeek] = await Promise.all([
     db
       .select({ userId: picks.userId, isCorrect: picks.isCorrect })
       .from(picks)
@@ -879,7 +897,27 @@ export async function getOverallStandings(seasonType: number) {
       })
       .from(picksSummary)
       .where(and(inArray(picksSummary.userId, userIds), eq(picksSummary.seasonType, seasonType))),
+    // Every completed game this season, by week -- the shared denominator
+    // for win rate below. A skipped pick isn't graded "correct," but it was
+    // still a real game everyone else got a shot at, so it has to count
+    // against a player's percentage the same as a wrong pick would; using
+    // each player's own picked-game count as the denominator instead let
+    // someone who skipped games post a HIGHER percentage than someone who
+    // picked every game and got the same number right, since the misses
+    // just shrank their own denominator instead of counting against them.
+    db
+      .select({ weekNumber: games.weekNumber, count: sql<number>`count(*)` })
+      .from(games)
+      .where(and(eq(games.seasonType, seasonType), eq(games.completed, true)))
+      .groupBy(games.weekNumber),
   ]);
+
+  const gradedGamesCountByWeek = new Map<number, number>();
+  let totalGradedGames = 0;
+  for (const row of gradedGamesByWeek) {
+    gradedGamesCountByWeek.set(row.weekNumber, row.count);
+    totalGradedGames += row.count;
+  }
 
   // Closest tiebreaker guess of each week, among everyone who submitted one --
   // restricted to weeks that are actually fully graded (picksSummary.rank is
@@ -920,8 +958,9 @@ export async function getOverallStandings(seasonType: number) {
     const correctPicks = userPicks.filter((p) => p.isCorrect === true).length;
     const incorrectPicks = userPicks.filter((p) => p.isCorrect === false).length;
     const pendingPicks = userPicks.filter((p) => p.isCorrect === null).length;
-    const gradedPicks = correctPicks + incorrectPicks;
-    const winRate = gradedPicks > 0 ? (correctPicks / gradedPicks) * 100 : 0;
+    // Against every graded game this season, not just the ones this player
+    // actually picked -- see the query comment above.
+    const winRate = totalGradedGames > 0 ? (correctPicks / totalGradedGames) * 100 : 0;
 
     // Weekly-rank bonuses. updateWeeklyStandings assigns rank as a strict
     // sequential order (no ties, thanks to tiebreakerSubmittedAt breaking
@@ -946,13 +985,18 @@ export async function getOverallStandings(seasonType: number) {
     let worstWeek = null;
 
     if (completedWeeks.length > 0) {
-      const weekPerformances = completedWeeks.map((w) => ({
-        seasonType,
-        weekNumber: w.weekNumber,
-        correct: w.correctPicksCount ?? 0,
-        total: w.totalPicksCount ?? 0,
-        percentage: w.totalPicksCount ? ((w.correctPicksCount ?? 0) / w.totalPicksCount) * 100 : 0,
-      }));
+      const weekPerformances = completedWeeks.map((w) => {
+        // Same fix as the season-long win rate above: against every game
+        // graded that week, not just the ones this player picked.
+        const gradedThisWeek = gradedGamesCountByWeek.get(w.weekNumber) ?? 0;
+        return {
+          seasonType,
+          weekNumber: w.weekNumber,
+          correct: w.correctPicksCount ?? 0,
+          total: w.totalPicksCount ?? 0,
+          percentage: gradedThisWeek > 0 ? ((w.correctPicksCount ?? 0) / gradedThisWeek) * 100 : 0,
+        };
+      });
 
       bestWeek = weekPerformances.reduce((best, current) =>
         current.percentage > best.percentage ? current : best
@@ -972,6 +1016,10 @@ export async function getOverallStandings(seasonType: number) {
       correctPicks,
       incorrectPicks,
       pendingPicks,
+      // Same shared value on every row -- the season-to-date denominator
+      // behind winRate, and what the UI shows as "of N" next to it so the
+      // two numbers never disagree (see season-standings-table.tsx).
+      totalGradedGames,
       winRate: Math.round(winRate * 10) / 10,
       weeklyFirsts,
       weeklySeconds,

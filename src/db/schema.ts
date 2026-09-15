@@ -34,6 +34,7 @@ export type UserPreferences = {
     pickReminders?: boolean;
     autoPickDigest?: boolean;
     lockerRoomMentions?: boolean;
+    weekResults?: boolean;
   };
   // Which panel occupies each of ContentShell's two side columns, last set
   // by the user via the picker in each column's header. Only ever read
@@ -404,7 +405,30 @@ export const pendingEmailChanges = sqliteTable("pending_email_changes", {
 export const siteSettings = sqliteTable("site_settings", {
   id: text("id").primaryKey(),
   homeMessage: text("home_message"),
+  // The editable source content for the automated week-results email (see
+  // src/lib/week-results-email.ts) -- null until an admin sets one, same
+  // "unset means don't send" convention as homeMessage being null meaning
+  // no banner. {week_results_*} merge variables (email-merge-vars.ts) get
+  // resolved into weekResultsEmailBody at send time.
+  weekResultsEmailSubject: text("week_results_email_subject"),
+  weekResultsEmailBody: text("week_results_email_body"),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date()
+  ),
+});
+
+// One row per (seasonType, weekNumber) that's already had its automated
+// week-results email sent (see src/lib/week-results-email.ts) -- exists
+// purely so the 15-minute cron tick that looks for newly-completed weeks
+// (picks_summary.rank just went non-null) doesn't re-send every tick.
+// Backfilled for every already-complete week as of the migration that
+// created this table, so turning the feature on doesn't retroactively
+// email old weeks an admin already covered by hand.
+export const weekResultsEmails = sqliteTable("week_results_emails", {
+  id: text("id").primaryKey(),
+  seasonType: integer("season_type").notNull(),
+  weekNumber: integer("week_number").notNull(),
+  sentAt: integer("sent_at", { mode: "timestamp" }).$defaultFn(
     () => new Date()
   ),
 });
