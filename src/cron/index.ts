@@ -9,8 +9,8 @@ import { games } from "../db/schema";
 import { getEnv } from "../lib/env";
 import { runEspnSync } from "../lib/sync-runner";
 import { applyAutoPicks } from "../lib/auto-picks";
-import { sendPickReminders } from "../lib/pick-reminders";
-import { sendWeekResultsEmails } from "../lib/week-results-email";
+import { getUsersWithMissingPicksToday, sendPickReminders, sendPickRemindersPush } from "../lib/pick-reminders";
+import { getWeekResultsCandidates, sendWeekResultsEmails, sendWeekResultsPush } from "../lib/week-results-email";
 
 // Skips the ESPN fetch on ticks where nothing's in progress -- not because
 // of any Cloudflare-style egress block or per-invocation billing (neither
@@ -44,16 +44,45 @@ async function tick(): Promise<void> {
     console.error("Scheduled auto-pick check failed:", error);
   }
 
+  // Computed once and handed to both the email and push senders below --
+  // they'd otherwise each independently re-run the identical games/users/
+  // picks query, every 15 minutes, all season.
   try {
-    await sendPickReminders(env);
+    const usersWithMissingPicks = await getUsersWithMissingPicksToday(db);
+
+    try {
+      await sendPickReminders(env, usersWithMissingPicks);
+    } catch (error) {
+      console.error("Scheduled pick reminder check failed:", error);
+    }
+
+    try {
+      await sendPickRemindersPush(env, usersWithMissingPicks);
+    } catch (error) {
+      console.error("Scheduled pick reminder push check failed:", error);
+    }
   } catch (error) {
-    console.error("Scheduled pick reminder check failed:", error);
+    console.error("Scheduled pick reminder data fetch failed:", error);
   }
 
+  // Same sharing as the pick-reminder block above -- one candidateWeeks/
+  // recipients query handed to both channels instead of each re-running it.
   try {
-    await sendWeekResultsEmails(env);
+    const weekResultsCandidates = await getWeekResultsCandidates();
+
+    try {
+      await sendWeekResultsEmails(env, weekResultsCandidates);
+    } catch (error) {
+      console.error("Scheduled week results email check failed:", error);
+    }
+
+    try {
+      await sendWeekResultsPush(env, weekResultsCandidates);
+    } catch (error) {
+      console.error("Scheduled week results push check failed:", error);
+    }
   } catch (error) {
-    console.error("Scheduled week results email check failed:", error);
+    console.error("Scheduled week results data fetch failed:", error);
   }
 }
 

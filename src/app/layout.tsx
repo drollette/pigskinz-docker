@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
 import { Navbar } from "@/components/navbar";
+import { HomeMessageBanner } from "@/components/home-message-banner";
 import { Footer } from "@/components/footer";
 import { PWAProvider } from "@/components/pwa-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeScript } from "@/components/theme-script";
 import { getCurrentUser } from "@/lib/auth";
-import { getCurrentWeekFromDb } from "@/lib/data";
+import { getCurrentWeekFromDb, getHomeMessage } from "@/lib/data";
 import { blackOpsOne, radioCanadaBig } from "@/lib/fonts";
 import { POOL_NAME } from "@/lib/site-config";
 import "./globals.css";
@@ -61,13 +62,14 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [user, weekData] = await Promise.all([
+  const [user, weekData, homeMessage] = await Promise.all([
     getCurrentUser().catch(() => null),
     getCurrentWeekFromDb().catch(() => ({
       week: 1,
       seasonType: 2,
       year: new Date().getFullYear(),
     })),
+    getHomeMessage().catch(() => null),
   ]);
 
   const currentWeek = weekData.week;
@@ -99,6 +101,7 @@ export default async function RootLayout({
               currentWeek={currentWeek}
               currentSeasonType={currentSeasonType}
             />
+            {homeMessage && <HomeMessageBanner message={homeMessage} />}
             <main className="py-4 pb-12">
               {/* max-w-7xl (1280px) left huge symmetric dead margins on the
                   new equal 3-column pages at very wide desktop monitors

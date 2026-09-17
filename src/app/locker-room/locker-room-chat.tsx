@@ -53,10 +53,9 @@ function detectMentionQuery(value: string, cursorPos: number): MentionQuery | nu
   return { query, start: beforeCursor.length - query.length - 1 };
 }
 
-/** Highlights only the @mentions that actually do something -- "admin" or a
- * real admin's username (which may contain spaces) -- so the highlight
- * doesn't imply an email went out when it didn't (mentioning an ordinary
- * player is just text now, not a notification). */
+/** Highlights any @mention that matches a real username or "admin" (which
+ * may contain spaces) -- everyone is mentionable now (push notifies them),
+ * even though email notifications for a mention still only reach admins. */
 function renderMessageBody(body: string, candidateUsernames: string[]) {
   return splitMessageForMentions(body, candidateUsernames).map((seg, i) =>
     seg.isMention ? (
@@ -69,11 +68,15 @@ function renderMessageBody(body: string, candidateUsernames: string[]) {
   );
 }
 
+// isAdmin: false here isn't a lie about this synthetic option -- it just
+// keeps it from getting the same "Admin" badge a real admin's own
+// username gets, since "All Administrators" already says what it is.
 const ALL_ADMINS_OPTION: ChatMentionCandidate = {
   id: "__all_admins__",
   username: "admin",
   name: "All Administrators",
   avatar: null,
+  isAdmin: false,
 };
 
 export function LockerRoomChat({
@@ -484,23 +487,19 @@ export function LockerRoomChat({
                 >
                   <Avatar name={c.name} avatar={c.avatar} seed={c.username} size="xs" />
                   <span className="font-medium shrink-0">@{c.username}</span>
-                  {c.id !== ALL_ADMINS_OPTION.id && (
-                    <span className="badge badge-primary badge-xs shrink-0">Admin</span>
-                  )}
+                  {c.isAdmin && <span className="badge badge-primary badge-xs shrink-0">Admin</span>}
                   <span className="text-base-content/50 truncate min-w-0">{c.name}</span>
                 </button>
               ))
             ) : (
-              <p className="px-3 py-2 text-sm text-base-content/50">
-                No matching admins -- mentions only reach admins
-              </p>
+              <p className="px-3 py-2 text-sm text-base-content/50">No matching users</p>
             )}
           </div>
         )}
         <textarea
           ref={textareaRef}
           className="textarea textarea-bordered flex-1 min-h-[2.5rem] max-h-32 resize-none"
-          placeholder="Say something... (@admin to reach the admins)"
+          placeholder="Say something... (@username to mention someone, @admin for all admins)"
           value={draft}
           maxLength={MAX_MESSAGE_LENGTH}
           disabled={sending}

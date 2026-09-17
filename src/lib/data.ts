@@ -789,6 +789,11 @@ export async function getWeeklyStandings(
     .where(eq(users.isActive, true))
     .orderBy(
       desc(sql`COALESCE(${picksSummary.correctPicksCount}, 0)`),
+      // A user who hasn't submitted a tiebreaker guess at all has a NULL
+      // tiebreakerDiff -- SQLite's default ASC ordering sorts NULLs first,
+      // which would rank "never guessed" ahead of every real prediction,
+      // however far off. Push NULLs to the back before sorting real diffs.
+      sql`${picksSummary.tiebreakerDiff} IS NULL`,
       asc(picksSummary.tiebreakerDiff),
       // A user who hasn't submitted a tiebreaker guess at all has a NULL
       // tiebreakerSubmittedAt -- SQLite's default ASC ordering sorts NULLs
@@ -1033,13 +1038,27 @@ export async function getOverallStandings(seasonType: number) {
   // Points is the headline ranking stat now — it already folds in weekly
   // 1st/2nd and closest-tiebreaker bonuses on top of 1 point per correct
   // pick. Win rate (raw accuracy) only breaks a tie in total points.
-  return standings
+  const sorted = standings
     .filter((s) => s.totalPicks > 0)
     .sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       return b.winRate - a.winRate;
-    })
-    .map((s, index) => ({ ...s, rank: index + 1 }));
+    });
+
+  // Standard competition ranking (1, 2, 3, 3, 5): players tied on both
+  // sort keys above share the same rank, and the next distinct player's
+  // rank still reflects their 1-based position in the sorted list (so a
+  // 2-way tie for 3rd is followed by 5th, not 4th) -- there's no further
+  // tiebreaker at this level the way weekly rank has via tiebreakerDiff,
+  // so a real tie here should read as a tie, not an arbitrary split.
+  const ranked: (typeof sorted[number] & { rank: number })[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const s = sorted[i];
+    const previous = ranked[i - 1];
+    const tiedWithPrevious = previous && previous.points === s.points && previous.winRate === s.winRate;
+    ranked.push({ ...s, rank: tiedWithPrevious ? previous.rank : i + 1 });
+  }
+  return ranked;
 }
 
 /**
@@ -1316,21 +1335,32 @@ export interface ChatMentionCandidate {
   username: string;
   name: string;
   avatar: string | null;
+  isAdmin: boolean;
 }
 
-/** Everyone @-mentionable in the Locker Room composer's autocomplete --
- * admins only, so @mentions stay a way to get an admin's attention rather
- * than a general player-to-player notification (see notifyAdmins in
- * locker-room/actions.ts for the matching server-side restriction). Active
- * admins with a username set (one who never picked a username can't be
- * mentioned, since mentions are matched by username, not display name). */
+/** Everyone @-mentionable in the Locker Room composer's autocomplete.
+ * Previously admins only (so @mentions stayed a way to get an admin's
+ * attention rather than a general player-to-player notification), widened
+ * once push notifications made general @mentions/replies meaningful --
+ * everyone can be @mentioned now, though email notifications for a mention
+ * still only reach admins (see notifyRecipients in locker-room/actions.ts).
+ * Active users with a username set (one who never picked a username can't
+ * be mentioned, since mentions are matched by username, not display name). */
 export async function getChatMentionCandidates(): Promise<ChatMentionCandidate[]> {
   const db = getDb();
 
   const rows = await db
-    .select({ id: users.id, username: users.username, name: users.name, avatar: users.avatar })
+    .select({
+      id: users.id,
+      username: users.username,
+      name: users.name,
+      avatar: users.avatar,
+      isAdmin: users.isAdmin,
+    })
     .from(users)
-    .where(and(isNotNull(users.username), eq(users.isActive, true), eq(users.isAdmin, true)));
+    .where(and(isNotNull(users.username), eq(users.isActive, true)));
 
-  return rows.filter((r): r is ChatMentionCandidate => r.username !== null);
+  return rows
+    .filter((r): r is typeof r & { username: string } => r.username !== null)
+    .map((r) => ({ ...r, isAdmin: !!r.isAdmin }));
 }

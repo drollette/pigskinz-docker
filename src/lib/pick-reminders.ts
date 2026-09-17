@@ -4,6 +4,7 @@ import { games, picks, users } from "../db/schema";
 import type { UserPreferences } from "../db/schema";
 import type { AppEnv } from "./env";
 import { sendPickReminderEmail } from "./email";
+import { sendPushToUser } from "./push";
 
 export interface MissingPickGame {
   id: string;
@@ -72,13 +73,22 @@ export function startOfEasternDayUTC(now: Date, timeZone = "America/New_York"): 
   return new Date(localMidnightAsUTC - offsetMinutes * 60000);
 }
 
+export interface UserWithMissingPicks {
+  userId: string;
+  email: string;
+  name: string;
+  preferences: UserPreferences | null;
+  games: MissingPickGame[];
+}
+
 /**
  * Games kicking off later today (US Eastern calendar day) that are still
- * pickable, grouped by every verified user who hasn't picked them yet.
+ * pickable, grouped by every verified, active user who hasn't picked them
+ * yet -- regardless of notification preferences, which each channel
+ * (email/push) filters for itself below, since a user can have one channel
+ * enabled and not the other.
  */
-export async function getUsersWithMissingPicksToday(
-  db: Database
-): Promise<{ userId: string; email: string; name: string; games: MissingPickGame[] }[]> {
+export async function getUsersWithMissingPicksToday(db: Database): Promise<UserWithMissingPicks[]> {
   const now = new Date();
   const startOfDay = startOfEasternDayUTC(now);
   const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
@@ -107,7 +117,7 @@ export async function getUsersWithMissingPicksToday(
 
   const gameIds = todaysGames.map((g) => g.id);
 
-  const [allEligibleUsers, existingPicks] = await Promise.all([
+  const [eligibleUsers, existingPicks] = await Promise.all([
     db
       .select({ id: users.id, email: users.email, name: users.name, preferences: users.preferences })
       .from(users)
@@ -118,14 +128,6 @@ export async function getUsersWithMissingPicksToday(
       .where(inArray(picks.gameId, gameIds)),
   ]);
 
-  // Opt-out, not opt-in: absent/undefined means the reminder still goes
-  // out, matching behavior from before this preference existed. The master
-  // `enabled` switch overrides the individual toggle when off.
-  const verifiedUsers = allEligibleUsers.filter((u) => {
-    const emailPrefs = (u.preferences as UserPreferences | null)?.emailNotifications;
-    return emailPrefs?.enabled !== false && emailPrefs?.pickReminders !== false;
-  });
-
   const pickedGameIdsByUser = new Map<string, Set<string>>();
   for (const pick of existingPicks) {
     if (!pickedGameIdsByUser.has(pick.userId)) {
@@ -134,12 +136,18 @@ export async function getUsersWithMissingPicksToday(
     pickedGameIdsByUser.get(pick.userId)!.add(pick.gameId);
   }
 
-  const result: { userId: string; email: string; name: string; games: MissingPickGame[] }[] = [];
-  for (const user of verifiedUsers) {
+  const result: UserWithMissingPicks[] = [];
+  for (const user of eligibleUsers) {
     const picked = pickedGameIdsByUser.get(user.id);
     const missing = todaysGames.filter((g) => !picked?.has(g.id));
     if (missing.length > 0) {
-      result.push({ userId: user.id, email: user.email, name: user.name, games: missing });
+      result.push({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        preferences: user.preferences as UserPreferences | null,
+        games: missing,
+      });
     }
   }
 
@@ -156,12 +164,30 @@ export function isSameEasternDay(a: Date, b: Date): boolean {
  * users.lastPickReminderSentAt rather than by a fixed send time, so this
  * can just run on the same 15-minute production cron that already gates
  * the ESPN sync (see worker.ts) without any extra scheduling.
+ *
+ * `usersWithMissingPicks`, when passed, skips the games/users/picks query
+ * this function would otherwise run itself -- src/cron/index.ts computes it
+ * once and hands the same result to both this and sendPickRemindersPush,
+ * since both would otherwise redo the identical query on every 15-minute
+ * tick, all season.
  */
-export async function sendPickReminders(env: AppEnv): Promise<void> {
+export async function sendPickReminders(
+  env: AppEnv,
+  usersWithMissingPicks?: UserWithMissingPicks[]
+): Promise<void> {
   const now = new Date();
 
-  const usersWithMissingPicks = await getUsersWithMissingPicksToday(db);
+  usersWithMissingPicks ??= await getUsersWithMissingPicksToday(db);
   if (usersWithMissingPicks.length === 0) return;
+
+  // Opt-out, not opt-in: absent/undefined means the reminder still goes
+  // out, matching behavior from before this preference existed. The master
+  // `enabled` switch overrides the individual toggle when off.
+  const emailEligible = usersWithMissingPicks.filter((u) => {
+    const emailPrefs = u.preferences?.emailNotifications;
+    return emailPrefs?.enabled !== false && emailPrefs?.pickReminders !== false;
+  });
+  if (emailEligible.length === 0) return;
 
   const alreadySentToday = new Set(
     (
@@ -171,7 +197,7 @@ export async function sendPickReminders(env: AppEnv): Promise<void> {
         .where(
           inArray(
             users.id,
-            usersWithMissingPicks.map((u) => u.userId)
+            emailEligible.map((u) => u.userId)
           )
         )
     )
@@ -179,7 +205,7 @@ export async function sendPickReminders(env: AppEnv): Promise<void> {
       .map((u) => u.id)
   );
 
-  for (const user of usersWithMissingPicks) {
+  for (const user of emailEligible) {
     if (alreadySentToday.has(user.userId)) continue;
 
     try {
@@ -194,6 +220,65 @@ export async function sendPickReminders(env: AppEnv): Promise<void> {
       // success, so a failure here naturally retries on the next tick
       // rather than being silently skipped for the rest of the day.
       console.error(`Failed to send pick reminder to ${user.email}:`, error);
+    }
+  }
+}
+
+/**
+ * Push equivalent of sendPickReminders above -- same once-per-day cadence,
+ * gated by its own lastPickReminderPushSentAt column so a user with both
+ * channels enabled gets one email AND one push per day, not whichever
+ * channel's branch happens to run first on the shared cron tick. See
+ * sendPickReminders' doc comment for why `usersWithMissingPicks` is
+ * accepted as an optional precomputed value.
+ */
+export async function sendPickRemindersPush(
+  env: AppEnv,
+  usersWithMissingPicks?: UserWithMissingPicks[]
+): Promise<void> {
+  const now = new Date();
+
+  usersWithMissingPicks ??= await getUsersWithMissingPicksToday(db);
+  if (usersWithMissingPicks.length === 0) return;
+
+  const pushEligible = usersWithMissingPicks.filter((u) => {
+    const pushPrefs = u.preferences?.pushNotifications;
+    return pushPrefs?.enabled !== false && pushPrefs?.missingPicks !== false;
+  });
+  if (pushEligible.length === 0) return;
+
+  const alreadySentToday = new Set(
+    (
+      await db
+        .select({ id: users.id, lastPickReminderPushSentAt: users.lastPickReminderPushSentAt })
+        .from(users)
+        .where(
+          inArray(
+            users.id,
+            pushEligible.map((u) => u.userId)
+          )
+        )
+    )
+      .filter((u) => u.lastPickReminderPushSentAt && isSameEasternDay(u.lastPickReminderPushSentAt, now))
+      .map((u) => u.id)
+  );
+
+  for (const user of pushEligible) {
+    if (alreadySentToday.has(user.userId)) continue;
+
+    try {
+      const gameWord = user.games.length === 1 ? "game" : "games";
+      await sendPushToUser(db, env, user.userId, {
+        title: "Missing picks",
+        body: `You have ${user.games.length} ${gameWord} left to pick today.`,
+        url: `/picks/${user.games[0].seasonType}/${user.games[0].weekNumber}`,
+      });
+      await db
+        .update(users)
+        .set({ lastPickReminderPushSentAt: now })
+        .where(eq(users.id, user.userId));
+    } catch (error) {
+      console.error(`Failed to send pick reminder push to user ${user.userId}:`, error);
     }
   }
 }

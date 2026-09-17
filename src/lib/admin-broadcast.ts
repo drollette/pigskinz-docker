@@ -3,6 +3,7 @@ import { users } from "@/db/schema";
 import type { Database } from "@/db";
 import type { AppEnv } from "./env";
 import { sendAdminBroadcastEmail } from "./email";
+import { sendPushToUser } from "./push";
 import { getMergeVariablesForUsers, applyMergeVariables } from "./email-merge-vars";
 
 export type BroadcastRecipientMode = "all" | "unpaid" | "selected";
@@ -13,12 +14,28 @@ export interface BroadcastResult {
   failed: number;
 }
 
+// The admin-authored body is sanitized HTML (see HOME_MESSAGE_ALLOWED_TAGS
+// in admin/actions.ts), fine for an email but too much markup for a one-line
+// push body -- strips tags down to plain text and truncates, same idea as
+// truncateForNotification in locker-room/actions.ts.
+function stripHtmlForPush(html: string, maxLength = 120): string {
+  const text = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
 /**
  * Sends an admin-authored email to either every registered user or a
  * specific set of them (an "individual" is just a one-element selection).
  * Sends are sequential with a per-recipient try/catch, matching the pattern
  * used for pick-reminder and auto-pick emails, so one bad address doesn't
  * block the rest of the batch.
+ *
+ * Also pushes the same message to every recipient's subscribed device(s),
+ * unconditionally -- like the email above, an admin broadcast has no
+ * per-user opt-out on either channel (it's a "reach everyone" tool by
+ * design, not a routine digest). Push failures are logged but don't affect
+ * BroadcastResult, which stays email-only to match what the admin dashboard
+ * actually displays ("Sent to X of Y recipients").
  */
 export async function sendAdminBroadcast(
   db: Database,
@@ -70,6 +87,18 @@ export async function sendAdminBroadcast(
     } catch (error) {
       console.error(`Failed to send admin broadcast to ${recipient.email}:`, error);
       failed++;
+    }
+
+    try {
+      const vars = mergeVarsByUser?.get(recipient.id);
+      const recipientBody = vars ? applyMergeVariables(bodyHtml, vars) : bodyHtml;
+      await sendPushToUser(db, env, recipient.id, {
+        title: vars ? applyMergeVariables(subject, vars) : subject,
+        body: stripHtmlForPush(recipientBody),
+        url: "/",
+      });
+    } catch (error) {
+      console.error(`Failed to send admin broadcast push to ${recipient.id}:`, error);
     }
   }
 

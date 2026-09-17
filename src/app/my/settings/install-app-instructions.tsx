@@ -2,26 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Share, MoreVertical, Download, CheckCircle2 } from "lucide-react";
-
-type Platform = "ios" | "android" | "desktop" | "unknown";
-
-function detectPlatform(): Platform {
-  const ua = navigator.userAgent;
-  // iPadOS reports as "Mac" in the UA string but is still a touch device.
-  const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && navigator.maxTouchPoints > 1);
-  if (isIOS) return "ios";
-  if (/Android/.test(ua)) return "android";
-  if (/Chrome|Edg/.test(ua)) return "desktop";
-  return "unknown";
-}
-
-function isStandalone(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    // iOS Safari's own (non-standard) flag for an installed home-screen app.
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
-}
+import { detectPlatform, isStandalone, type Platform } from "@/lib/platform";
 
 export function InstallAppInstructions() {
   const [platform, setPlatform] = useState<Platform | null>(null);
