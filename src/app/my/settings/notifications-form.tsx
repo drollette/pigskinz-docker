@@ -158,7 +158,12 @@ export function NotificationsForm({
         userAgent: navigator.userAgent,
         createdAt: new Date().toISOString(),
       };
-      setDevices((d) => [...d.filter((existing) => existing.userAgent !== newDevice.userAgent), newDevice]);
+      // Dedup on id, not userAgent -- subscribePushAction upserts on the
+      // subscription endpoint (schema.ts), so re-subscribing the same
+      // device always returns that same id, while two different devices
+      // that merely share a User-Agent string get distinct ids and both
+      // stay listed.
+      setDevices((d) => [...d.filter((existing) => existing.id !== newDevice.id), newDevice]);
       setStatus("subscribed");
       toast.success("Push notifications enabled");
     } catch (error) {

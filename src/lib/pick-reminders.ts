@@ -73,7 +73,7 @@ export function startOfEasternDayUTC(now: Date, timeZone = "America/New_York"): 
   return new Date(localMidnightAsUTC - offsetMinutes * 60000);
 }
 
-interface UserWithMissingPicks {
+export interface UserWithMissingPicks {
   userId: string;
   email: string;
   name: string;
@@ -164,11 +164,20 @@ export function isSameEasternDay(a: Date, b: Date): boolean {
  * users.lastPickReminderSentAt rather than by a fixed send time, so this
  * can just run on the same 15-minute production cron that already gates
  * the ESPN sync (see worker.ts) without any extra scheduling.
+ *
+ * `usersWithMissingPicks`, when passed, skips the games/users/picks query
+ * this function would otherwise run itself -- src/cron/index.ts computes it
+ * once and hands the same result to both this and sendPickRemindersPush,
+ * since both would otherwise redo the identical query on every 15-minute
+ * tick, all season.
  */
-export async function sendPickReminders(env: AppEnv): Promise<void> {
+export async function sendPickReminders(
+  env: AppEnv,
+  usersWithMissingPicks?: UserWithMissingPicks[]
+): Promise<void> {
   const now = new Date();
 
-  const usersWithMissingPicks = await getUsersWithMissingPicksToday(db);
+  usersWithMissingPicks ??= await getUsersWithMissingPicksToday(db);
   if (usersWithMissingPicks.length === 0) return;
 
   // Opt-out, not opt-in: absent/undefined means the reminder still goes
@@ -219,12 +228,17 @@ export async function sendPickReminders(env: AppEnv): Promise<void> {
  * Push equivalent of sendPickReminders above -- same once-per-day cadence,
  * gated by its own lastPickReminderPushSentAt column so a user with both
  * channels enabled gets one email AND one push per day, not whichever
- * channel's branch happens to run first on the shared cron tick.
+ * channel's branch happens to run first on the shared cron tick. See
+ * sendPickReminders' doc comment for why `usersWithMissingPicks` is
+ * accepted as an optional precomputed value.
  */
-export async function sendPickRemindersPush(env: AppEnv): Promise<void> {
+export async function sendPickRemindersPush(
+  env: AppEnv,
+  usersWithMissingPicks?: UserWithMissingPicks[]
+): Promise<void> {
   const now = new Date();
 
-  const usersWithMissingPicks = await getUsersWithMissingPicksToday(db);
+  usersWithMissingPicks ??= await getUsersWithMissingPicksToday(db);
   if (usersWithMissingPicks.length === 0) return;
 
   const pushEligible = usersWithMissingPicks.filter((u) => {

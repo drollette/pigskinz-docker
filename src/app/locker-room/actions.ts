@@ -56,6 +56,12 @@ async function notifyRecipients(
   replyToId: string | undefined
 ): Promise<void> {
   const [allUsers, replyToRow] = await Promise.all([
+    // No isActive filter here -- a paused user (dues not paid) can still
+    // log in and read the Locker Room per CLAUDE.md's "full pause" model,
+    // and admins in particular were notified of mentions/replies
+    // unconditionally before this widening existed. Filtering this query
+    // would silently drop a paused admin from candidateUsernames entirely,
+    // not just from notifications.
     db
       .select({
         id: users.id,
@@ -65,8 +71,7 @@ async function notifyRecipients(
         isAdmin: users.isAdmin,
         preferences: users.preferences,
       })
-      .from(users)
-      .where(eq(users.isActive, true)),
+      .from(users),
     replyToId
       ? db.select({ userId: chatMessages.userId }).from(chatMessages).where(eq(chatMessages.id, replyToId)).limit(1)
       : Promise.resolve([]),
@@ -79,9 +84,20 @@ async function notifyRecipients(
 
   const admins = allUsers.filter((u) => u.isAdmin);
   const mentionsAllAdmins = mentionedUsernames.has("admin");
-  const usersByUsername = new Map(
-    allUsers.filter((u) => u.username).map((u) => [u.username!.toLowerCase(), u])
-  );
+  // Grouped (not collapsed) by lowercase username: uniqueness is enforced
+  // case-sensitively (see updateUserUsername in auth.ts), so two users can
+  // collide case-insensitively (e.g. "Bob" and "bob"). findMentionedUsernames
+  // only ever returns the lowercased match, so a collision here is
+  // genuinely ambiguous -- resolved below by skipping rather than guessing
+  // which of the two colliding users was meant.
+  const usersByLowercaseUsername = new Map<string, (typeof allUsers)[number][]>();
+  for (const u of allUsers) {
+    if (!u.username) continue;
+    const key = u.username.toLowerCase();
+    const bucket = usersByLowercaseUsername.get(key);
+    if (bucket) bucket.push(u);
+    else usersByLowercaseUsername.set(key, [u]);
+  }
 
   const emailRecipients = new Map<string, LockerRoomNotificationKind>();
   for (const admin of admins) {
@@ -102,8 +118,10 @@ async function notifyRecipients(
   }
   for (const username of mentionedUsernames) {
     if (username === "admin") continue;
-    const mentioned = usersByUsername.get(username);
-    if (mentioned && mentioned.id !== sender.id) pushRecipients.set(mentioned.id, "mention");
+    const matches = usersByLowercaseUsername.get(username);
+    if (matches?.length === 1 && matches[0].id !== sender.id) {
+      pushRecipients.set(matches[0].id, "mention");
+    }
   }
   if (replyToAuthorId && replyToAuthorId !== sender.id) {
     pushRecipients.set(replyToAuthorId, "reply");

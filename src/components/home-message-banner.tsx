@@ -22,7 +22,14 @@ export function HomeMessageBanner({ message }: HomeMessageBannerProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    setVisible(localStorage.getItem(DISMISSED_STORAGE_KEY) !== message);
+    let dismissed: string | null = null;
+    try {
+      dismissed = localStorage.getItem(DISMISSED_STORAGE_KEY);
+    } catch {
+      // Storage inaccessible (private browsing, blocked site data) -- show
+      // the banner; dismissal just won't persist across reloads.
+    }
+    setVisible(dismissed !== message);
   }, [message]);
 
   if (!visible) return null;
@@ -36,7 +43,12 @@ export function HomeMessageBanner({ message }: HomeMessageBannerProps) {
         />
         <button
           onClick={() => {
-            localStorage.setItem(DISMISSED_STORAGE_KEY, message);
+            try {
+              localStorage.setItem(DISMISSED_STORAGE_KEY, message);
+            } catch {
+              // Storage inaccessible -- dismissal won't persist, but the
+              // click should still close the banner for this render.
+            }
             setVisible(false);
           }}
           className="btn btn-ghost btn-xs btn-circle shrink-0"

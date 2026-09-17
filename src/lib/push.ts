@@ -47,8 +47,17 @@ export async function sendPushNotification(
     privateKey: env.VAPID_PRIVATE_KEY,
   };
 
+  // Per RFC 8030, ttl controls how long the push service holds an
+  // undelivered message before giving up -- a device that's asleep/offline
+  // at the moment a once-a-day cron digest fires (pick reminders, week
+  // results) would otherwise just never get it, even though the push
+  // service's 2xx response only means "accepted for delivery," not
+  // "delivered." 24h covers a full day so a device that reconnects before
+  // the next day's digest still gets today's.
+  const PUSH_TTL_SECONDS = 24 * 60 * 60;
+
   const request = await buildPushPayload(
-    { data: JSON.stringify(payload), options: { ttl: 60 } },
+    { data: JSON.stringify(payload), options: { ttl: PUSH_TTL_SECONDS } },
     subscription,
     vapid
   );
