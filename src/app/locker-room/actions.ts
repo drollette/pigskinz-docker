@@ -84,20 +84,9 @@ async function notifyRecipients(
 
   const admins = allUsers.filter((u) => u.isAdmin);
   const mentionsAllAdmins = mentionedUsernames.has("admin");
-  // Grouped (not collapsed) by lowercase username: uniqueness is enforced
-  // case-sensitively (see updateUserUsername in auth.ts), so two users can
-  // collide case-insensitively (e.g. "Bob" and "bob"). findMentionedUsernames
-  // only ever returns the lowercased match, so a collision here is
-  // genuinely ambiguous -- resolved below by skipping rather than guessing
-  // which of the two colliding users was meant.
-  const usersByLowercaseUsername = new Map<string, (typeof allUsers)[number][]>();
-  for (const u of allUsers) {
-    if (!u.username) continue;
-    const key = u.username.toLowerCase();
-    const bucket = usersByLowercaseUsername.get(key);
-    if (bucket) bucket.push(u);
-    else usersByLowercaseUsername.set(key, [u]);
-  }
+  const usersByUsername = new Map(
+    allUsers.filter((u) => u.username).map((u) => [u.username!.toLowerCase(), u])
+  );
 
   const emailRecipients = new Map<string, LockerRoomNotificationKind>();
   for (const admin of admins) {
@@ -118,10 +107,8 @@ async function notifyRecipients(
   }
   for (const username of mentionedUsernames) {
     if (username === "admin") continue;
-    const matches = usersByLowercaseUsername.get(username);
-    if (matches?.length === 1 && matches[0].id !== sender.id) {
-      pushRecipients.set(matches[0].id, "mention");
-    }
+    const mentioned = usersByUsername.get(username);
+    if (mentioned && mentioned.id !== sender.id) pushRecipients.set(mentioned.id, "mention");
   }
   if (replyToAuthorId && replyToAuthorId !== sender.id) {
     pushRecipients.set(replyToAuthorId, "reply");

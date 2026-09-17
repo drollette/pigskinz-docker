@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getDb } from "./env";
 import { sessions, users } from "@/db/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, sql } from "drizzle-orm";
 import {
   generateId,
   hashPassword,
@@ -128,11 +128,15 @@ export async function registerUser(
     throw new Error("Email already registered");
   }
 
-  // Check if username already exists
+  // Case-insensitive: "username" isn't COLLATE NOCASE at the schema level
+  // (case-sensitively unique there), but two usernames differing only by
+  // case would be indistinguishable to @mention matching in the Locker
+  // Room (deliberately case-insensitive there) and to anyone reading them
+  // aloud, so reject the collision here instead.
   const existingUsername = await db
     .select()
     .from(users)
-    .where(eq(users.username, username))
+    .where(sql`lower(${users.username}) = lower(${username})`)
     .limit(1);
 
   if (existingUsername.length > 0) {
@@ -221,11 +225,11 @@ export async function updateUserEmail(userId: string, email: string) {
 export async function updateUserUsername(userId: string, username: string) {
   const db = getDb();
 
-  // Check if username already exists
+  // Case-insensitive -- see the same check in registerUser above.
   const existing = await db
     .select()
     .from(users)
-    .where(eq(users.username, username))
+    .where(sql`lower(${users.username}) = lower(${username})`)
     .limit(1);
 
   if (existing.length > 0 && existing[0].id !== userId) {
