@@ -211,6 +211,11 @@ export async function updateWeeklyStandings(
     .where(and(eq(schema.picksSummary.seasonType, seasonType), eq(schema.picksSummary.weekNumber, weekNumber)))
     .orderBy(
       desc(schema.picksSummary.correctPicksCount),
+      // A user who never submitted a tiebreaker guess has a NULL
+      // tiebreakerDiff -- SQLite's default ASC ordering sorts NULLs first,
+      // which would let "never guessed" beat every real prediction, however
+      // far off. Push NULLs to the back before sorting real diffs ascending.
+      sql`${schema.picksSummary.tiebreakerDiff} IS NULL`,
       asc(schema.picksSummary.tiebreakerDiff),
       // Two different predictions can land the same distance from the
       // actual total — break that tie in favor of whoever predicted first.

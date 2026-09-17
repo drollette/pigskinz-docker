@@ -139,3 +139,49 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+
+// Push notifications -- payload is JSON built server-side (see
+// src/lib/push.ts), always { title, body, url }. `url` is where
+// notificationclick below sends the user; falls back to the site root if
+// missing so a malformed payload never produces a dead notification.
+self.addEventListener('push', (event) => {
+  let payload = { title: 'Pigskinz', body: '' , url: '/' };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch (err) {
+    console.error('[SW] Failed to parse push payload:', err);
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      // icon: the full wordmark, shown in the notification body.
+      // badge: a dedicated line-art football silhouette (matches
+      // favicon-16x16.png/favicon-32x32.png) for the status bar specifically
+      // -- that slot only renders an image's alpha channel, so it needs a
+      // transparent, alpha-shaped asset rather than the wordmark's opaque
+      // background (which rendered as a blank block).
+      icon: '/icons/icon-192x192.png',
+      badge: '/icons/notification-badge.png',
+      data: { url: payload.url },
+    })
+  );
+});
+
+// Focus an already-open tab on this origin if one exists, otherwise open a
+// new one at the notification's target URL.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data && event.notification.data.url ? event.notification.data.url : '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (client.url === new URL(url, self.location.origin).href && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
+});

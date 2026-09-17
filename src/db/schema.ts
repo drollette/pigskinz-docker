@@ -36,6 +36,19 @@ export type UserPreferences = {
     lockerRoomMentions?: boolean;
     weekResults?: boolean;
   };
+  // Push, unlike email, is opt-IN by construction: a user with no rows in
+  // push_subscriptions gets nothing regardless of these values, since the
+  // browser's own permission prompt is the real gate. These only matter
+  // once at least one subscription exists, to let a subscribed user quiet
+  // specific categories without revoking permission entirely. `enabled` is
+  // the master switch, same convention as emailNotifications above.
+  pushNotifications?: {
+    enabled?: boolean;
+    missingPicks?: boolean;
+    lockerRoomReplies?: boolean;
+    weekResults?: boolean;
+    autoPickDigest?: boolean;
+  };
   // Which panel occupies each of ContentShell's two side columns, last set
   // by the user via the picker in each column's header. Only ever read
   // through resolveSidePanels (src/lib/side-panels.ts), which falls back to
@@ -84,7 +97,19 @@ export const users = sqliteTable("users", {
   lastPickReminderSentAt: integer("last_pick_reminder_sent_at", {
     mode: "timestamp",
   }),
+  // Kept separate from lastPickReminderSentAt (the email gate) so the two
+  // channels' once-per-day gates don't fight over the same column -- a user
+  // with both enabled should get one email AND one push per day, not
+  // whichever channel's cron branch happens to run first.
+  lastPickReminderPushSentAt: integer("last_pick_reminder_push_sent_at", {
+    mode: "timestamp",
+  }),
   lastAutoPickEmailSentAt: integer("last_auto_pick_email_sent_at", {
+    mode: "timestamp",
+  }),
+  // Push equivalent of lastAutoPickEmailSentAt above, kept separate for the
+  // same reason as lastPickReminderPushSentAt/lastPickReminderSentAt.
+  lastAutoPickPushSentAt: integer("last_auto_pick_push_sent_at", {
     mode: "timestamp",
   }),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
@@ -433,6 +458,19 @@ export const weekResultsEmails = sqliteTable("week_results_emails", {
   ),
 });
 
+// Push equivalent of weekResultsEmails above -- its own table (rather than a
+// shared "sent" row) so the two channels' once-per-week gates don't fight
+// over the same tracking, same reasoning as
+// lastPickReminderPushSentAt/lastPickReminderSentAt on users.
+export const weekResultsPushes = sqliteTable("week_results_pushes", {
+  id: text("id").primaryKey(),
+  seasonType: integer("season_type").notNull(),
+  weekNumber: integer("week_number").notNull(),
+  sentAt: integer("sent_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date()
+  ),
+});
+
 // Reusable subject/body pairs for the admin "Email Users" form (see
 // AdminEmailForm) — an admin picks one from a dropdown to pre-fill the
 // composer, which stays fully editable before sending. Purely a starting
@@ -477,6 +515,39 @@ export const chatMessages = sqliteTable("chat_messages", {
     () => new Date()
   ),
 });
+
+// One row per (user, browser instance) that has granted push permission and
+// subscribed -- a user with the app on a phone and a laptop has two rows,
+// and both get every push (see src/lib/push.ts's sendPushToUser). `endpoint`
+// is unique because it's the push service's own identifier for that
+// subscription; re-subscribing the same device updates the existing row
+// (its keys can rotate) rather than creating a duplicate.
+export const pushSubscriptions = sqliteTable("push_subscriptions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  // Shown on the device-management list in Settings so a user can tell
+  // which row is "this phone" vs "that laptop" before removing one.
+  userAgent: text("user_agent"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date()
+  ),
+  // Set on a 404/410 from the push service (sendPushToUser) -- a row with
+  // this set is pruned on its next send attempt rather than kept around
+  // retrying a subscription that will never succeed again.
+  lastFailedAt: integer("last_failed_at", { mode: "timestamp" }),
+});
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [pushSubscriptions.userId],
+    references: [users.id],
+  }),
+}));
 
 export const emailVerificationCodesRelations = relations(
   emailVerificationCodes,
@@ -525,3 +596,4 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type PendingEmailChange = typeof pendingEmailChanges.$inferSelect;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;

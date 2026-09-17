@@ -1,4 +1,4 @@
-import { Trophy, ChevronRight } from "lucide-react";
+import { Trophy } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getCurrentWeekFromDb,
@@ -7,7 +7,6 @@ import {
   getAllPicksForWeek,
   getTiebreakerGame,
   getOverallStandings,
-  getHomeMessage,
   getFirstRegularSeasonGameDate,
   hasGameStarted,
 } from "@/lib/data";
@@ -37,7 +36,7 @@ export async function PoolStandingsView({ seasonType, weekNumber }: PoolStanding
   const resolvedSeasonType = seasonType ?? current.seasonType;
   const resolvedWeek = weekNumber ?? current.week;
 
-  const [overallStandings, games, weeklyStandings, allPicks, tiebreakerGame, homeMessage, firstGameDate] =
+  const [overallStandings, games, weeklyStandings, allPicks, tiebreakerGame, firstGameDate] =
     await withRetry(() =>
       Promise.all([
         getOverallStandings(resolvedSeasonType),
@@ -45,7 +44,6 @@ export async function PoolStandingsView({ seasonType, weekNumber }: PoolStanding
         getWeeklyStandings(resolvedSeasonType, resolvedWeek),
         getAllPicksForWeek(resolvedSeasonType, resolvedWeek),
         getTiebreakerGame(resolvedSeasonType, resolvedWeek),
-        getHomeMessage(),
         getFirstRegularSeasonGameDate(),
       ])
     );
@@ -91,22 +89,6 @@ export async function PoolStandingsView({ seasonType, weekNumber }: PoolStanding
     <div className="space-y-6">
       {firstGameDate && (
         <CountdownTimer targetDate={firstGameDate} label="Time until season kickoff" />
-      )}
-
-      {homeMessage && (
-        <details open className="group">
-          <summary className="flex cursor-pointer list-none items-center gap-1 text-sm @sm:text-base font-medium text-base-content/80">
-            <ChevronRight
-              size={16}
-              className="shrink-0 transition-transform group-open:rotate-90"
-            />
-            Message
-          </summary>
-          <div
-            className="prose prose-sm max-w-none mt-2 pl-6 text-base-content/80 [&_p]:my-1"
-            dangerouslySetInnerHTML={{ __html: homeMessage }}
-          />
-        </details>
       )}
 
       <HomeWeekNavigator currentWeek={resolvedWeek} currentSeasonType={resolvedSeasonType} />

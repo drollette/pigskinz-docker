@@ -5,6 +5,7 @@ import type { UserPreferences, AutoPickStrategy } from "../db/schema";
 import { generateId, favoredSide } from "./utils";
 import type { AppEnv } from "./env";
 import { sendAutoPickEmail } from "./email";
+import { sendPushToUser } from "./push";
 import { isSameEasternDay, startOfEasternDayUTC } from "./pick-reminders";
 
 // Matches games kicking off in this window on the tick right before they'd
@@ -18,6 +19,8 @@ export interface AutoPickedGame {
   name: string;
   shortName: string | null;
   teamAbbreviation: string;
+  weekNumber: number;
+  seasonType: number;
 }
 
 export interface UpcomingAutoPickGame {
@@ -63,14 +66,15 @@ function resolveTeam(
  *
  * On a normal game day (early/late/primetime kickoff windows) a single
  * user's missed picks can get auto-picked across several different cron
- * ticks. To avoid spamming them with one email per window, only the first
- * auto-pick of a user's (US Eastern calendar) day sends an email — gated by
- * users.lastAutoPickEmailSentAt, same pattern as sendPickReminders. That
- * one email is a hybrid digest: it reports what was just auto-picked *and*
- * previews the rest of today's not-yet-picked games that will also get
- * auto-picked later today if the user doesn't pick them first. Any further
- * auto-picks later that same day still happen, just silently — the user
- * already got advance notice.
+ * ticks. To avoid spamming them with one notification per window, only the
+ * first auto-pick of a user's (US Eastern calendar) day sends a digest per
+ * channel — email gated by users.lastAutoPickEmailSentAt, push by its own
+ * users.lastAutoPickPushSentAt, same pattern as sendPickReminders /
+ * sendPickRemindersPush. Each digest is a hybrid: it reports what was just
+ * auto-picked *and* previews the rest of today's not-yet-picked games that
+ * will also get auto-picked later today if the user doesn't pick them
+ * first. Any further auto-picks later that same day still happen, just
+ * silently — the user already got advance notice.
  */
 export async function applyAutoPicks(env: AppEnv): Promise<void> {
   const now = new Date();
@@ -104,6 +108,7 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
         name: users.name,
         preferences: users.preferences,
         lastAutoPickEmailSentAt: users.lastAutoPickEmailSentAt,
+        lastAutoPickPushSentAt: users.lastAutoPickPushSentAt,
       })
       .from(users)
       .where(and(eq(users.emailVerified, true), eq(users.isActive, true))),
@@ -123,7 +128,13 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
 
   const pickedByUser = new Map<
     string,
-    { email: string; name: string; lastAutoPickEmailSentAt: Date | null; games: AutoPickedGame[] }
+    {
+      email: string;
+      name: string;
+      lastAutoPickEmailSentAt: Date | null;
+      lastAutoPickPushSentAt: Date | null;
+      games: AutoPickedGame[];
+    }
   >();
 
   for (const user of autoPickUsers) {
@@ -158,12 +169,20 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
       const teamAbbreviation = teamId === game.homeTeamId ? homeAbbr : awayAbbr;
       const entry =
         pickedByUser.get(user.id) ??
-        { email: user.email, name: user.name, lastAutoPickEmailSentAt: user.lastAutoPickEmailSentAt, games: [] };
+        {
+          email: user.email,
+          name: user.name,
+          lastAutoPickEmailSentAt: user.lastAutoPickEmailSentAt,
+          lastAutoPickPushSentAt: user.lastAutoPickPushSentAt,
+          games: [],
+        };
       entry.games.push({
         gameId: game.id,
         name: game.name,
         shortName: game.shortName,
         teamAbbreviation,
+        weekNumber: game.weekNumber,
+        seasonType: game.seasonType,
       });
       pickedByUser.set(user.id, entry);
     }
@@ -171,11 +190,15 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
 
   if (pickedByUser.size === 0) return;
 
-  // Only the first auto-pick email of the day goes out — see the doc
-  // comment above. Users who already got one today, who've opted out of the
-  // digest email specifically, or who've flipped the master email switch
-  // off, are skipped here; their picks above still happened either way,
-  // just silently.
+  // Only the first auto-pick digest of the day goes out per channel — see
+  // the doc comment above. Users who already got one today, who've opted
+  // out of the digest specifically, or who've flipped that channel's master
+  // switch off, are skipped here; their picks above still happened either
+  // way, just silently. Email and push are gated by their own separate
+  // lastAutoPick*SentAt columns (same reasoning as
+  // lastPickReminderPushSentAt/lastPickReminderSentAt) so a user with both
+  // enabled gets one of each today, not whichever channel's branch below
+  // happens to find them first.
   const usersToEmail = [...pickedByUser.entries()].filter(([userId, entry]) => {
     const emailPrefs = preferencesByUserId.get(userId)?.emailNotifications;
     return (
@@ -185,10 +208,22 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
     );
   });
 
-  if (usersToEmail.length === 0) return;
+  const usersToPush = [...pickedByUser.entries()].filter(([userId, entry]) => {
+    const pushPrefs = preferencesByUserId.get(userId)?.pushNotifications;
+    return (
+      (!entry.lastAutoPickPushSentAt || !isSameEasternDay(entry.lastAutoPickPushSentAt, now)) &&
+      pushPrefs?.enabled !== false &&
+      pushPrefs?.autoPickDigest !== false
+    );
+  });
+
+  if (usersToEmail.length === 0 && usersToPush.length === 0) return;
 
   // Preview list: today's remaining games (after this tick's window) that
   // will get auto-picked later today unless the user picks them first.
+  // Shared by both channels' digests below.
+  const digestUserIds = [...new Set([...usersToEmail, ...usersToPush].map(([userId]) => userId))];
+
   const laterTodayGames = await db
     .select({
       id: games.id,
@@ -206,15 +241,7 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
     const laterPicks = await db
       .select({ userId: picks.userId, gameId: picks.gameId })
       .from(picks)
-      .where(
-        and(
-          inArray(picks.gameId, laterGameIds),
-          inArray(
-            picks.userId,
-            usersToEmail.map(([userId]) => userId)
-          )
-        )
-      );
+      .where(and(inArray(picks.gameId, laterGameIds), inArray(picks.userId, digestUserIds)));
     for (const p of laterPicks) {
       if (!previewPickKeysByUser.has(p.userId)) previewPickKeysByUser.set(p.userId, new Set());
       previewPickKeysByUser.get(p.userId)!.add(p.gameId);
@@ -235,6 +262,28 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
       // send naturally retries on the next tick rather than being silently
       // skipped for the rest of the day.
       console.error(`Failed to send auto-pick email to ${email}:`, error);
+    }
+  }
+
+  for (const [userId, { games: pickedGames }] of usersToPush) {
+    const alreadyPicked = previewPickKeysByUser.get(userId);
+    const upcomingCount = laterTodayGames.filter((g) => !alreadyPicked?.has(g.id)).length;
+    const firstGame = pickedGames[0];
+
+    const body =
+      pickedGames.length === 1
+        ? `We picked ${firstGame.teamAbbreviation} for ${firstGame.shortName ?? firstGame.name}.`
+        : `We auto-picked ${pickedGames.length} games for you today.`;
+
+    try {
+      await sendPushToUser(db, env, userId, {
+        title: "Auto-pick summary",
+        body: upcomingCount > 0 ? `${body} ${upcomingCount} more coming up today.` : body,
+        url: `/picks/${firstGame.seasonType}/${firstGame.weekNumber}`,
+      });
+      await db.update(users).set({ lastAutoPickPushSentAt: now }).where(eq(users.id, userId));
+    } catch (error) {
+      console.error(`Failed to send auto-pick push to user ${userId}:`, error);
     }
   }
 }

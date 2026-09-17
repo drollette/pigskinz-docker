@@ -38,10 +38,11 @@ imported by any Next page or route. The Dockerfile installs a full production `n
 
 **Path aliases**: files reachable from `server.ts` (`src/cron/`, `src/realtime/`, and anything they
 import — currently `src/lib/env.ts`, `src/lib/auto-picks.ts`, `src/lib/pick-reminders.ts`,
-`src/lib/email.ts`, `src/lib/site-config.ts`, `src/lib/sync-runner.ts`, `src/lib/espn-client.ts`,
-`src/lib/game-sync-core.ts`, `src/db/*`) must use relative imports (`../db`, `./env`), not the `@/...`
-alias. `tsx` runs these outside Next's bundler, which is the only thing that resolves `@/...` (via
-`tsconfig.json`'s `paths` + Next's own webpack config). Everything else in `src/` — pages, Server
+`src/lib/email.ts`, `src/lib/push.ts`, `src/lib/site-config.ts`, `src/lib/sync-runner.ts`,
+`src/lib/espn-client.ts`, `src/lib/game-sync-core.ts`, `src/lib/week-results.ts`,
+`src/lib/week-results-email.ts`, `src/db/*`) must use relative imports (`../db`, `./env`), not the
+`@/...` alias. `tsx` runs these outside Next's bundler, which is the only thing that resolves `@/...`
+(via `tsconfig.json`'s `paths` + Next's own webpack config). Everything else in `src/` — pages, Server
 Actions, API routes — is compiled by Next itself and can use `@/...` freely. `game-sync-core.ts` is
 imported from both sides (Next-bundled admin routes and the tsx-run cron/sync-runner), which is why it
 uses relative imports too, even though it doesn't strictly need to for the Next-bundled callers.
@@ -63,6 +64,31 @@ progress (a cheap database read, `hasGameInProgress`); the admin dashboard's "Sy
 Rollover" buttons (`src/app/admin/actions.ts` → `runEspnSync`/`runSeasonRollover`) call the same
 functions synchronously and wait for them to finish, rather than dispatching a workflow and returning
 immediately.
+
+## Web Push notifications
+
+`src/lib/push.ts` sends Web Push via `@block65/webcrypto-web-push`, which is built on the standard Web
+Crypto API rather than Node's `crypto` module — that's what lets it run identically in this container as
+it did in the Cloudflare original (Node 22 also exposes WebCrypto globally, the same reason
+`src/lib/utils.ts`'s `hashPassword` needs no extra package either). A user's subscribed devices live in
+`push_subscriptions` (one row per browser/device — a phone and a laptop are two rows, both get every
+push); a 404/410 from the push service means that subscription is gone for good, so
+`sendPushToUser` deletes the row immediately rather than retrying it forever.
+
+Every automated notification this app sends has a push equivalent alongside its email one — pick
+reminders, auto-pick digests, week-results, Locker Room mentions/replies, admin broadcasts — each gated
+by its own `UserPreferences.pushNotifications` toggles and (for the once-a-day/once-a-week ones) its own
+separate `lastPickReminderPushSentAt`/`lastAutoPickPushSentAt`/`weekResultsPushes` tracking, so a user
+with both channels enabled gets one of each rather than whichever channel's code happens to run first on
+a shared cron tick. Locker Room push is wider than email there: email only ever reaches admins (a "get
+an admin's attention" channel), but push notifies whoever was actually @mentioned or replied to, admin
+or not — see `notifyRecipients` in `src/app/locker-room/actions.ts`.
+
+Needs a VAPID keypair to do anything: `npm run vapid:generate` (a plain P-256 keypair via Node's
+WebCrypto, base64url-encoded — the same format `npx web-push generate-vapid-keys` or any other VAPID
+generator produces) prints `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` to put in `.env`. Both optional: unset,
+the "Push" toggle in Settings just fails to subscribe (the browser rejects an empty
+`applicationServerKey`) while email notifications keep working normally.
 
 ## No personal data, no hardcoded secrets — this repo is open source
 

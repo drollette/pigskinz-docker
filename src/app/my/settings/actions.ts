@@ -13,7 +13,7 @@ import {
   avatarSchema,
 } from "@/lib/schemas";
 import { getDb } from "@/lib/env";
-import { pendingEmailChanges, users, passwordResetTokens } from "@/db/schema";
+import { pendingEmailChanges, users, passwordResetTokens, pushSubscriptions } from "@/db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { generateId } from "@/lib/utils";
 import {
@@ -453,6 +453,141 @@ export async function updateEmailNotificationsAction(
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "Update failed",
+    };
+  }
+}
+
+const pushNotificationsSchema = z.object({
+  enabled: z.boolean(),
+  missingPicks: z.boolean(),
+  lockerRoomReplies: z.boolean(),
+  weekResults: z.boolean(),
+  autoPickDigest: z.boolean(),
+});
+
+type UpdatePushNotificationsResult = { error: string } | { success: true };
+
+export async function updatePushNotificationsAction(
+  enabled: boolean,
+  missingPicks: boolean,
+  lockerRoomReplies: boolean,
+  weekResults: boolean,
+  autoPickDigest: boolean
+): Promise<UpdatePushNotificationsResult> {
+  const user = await requireAuth();
+
+  const parsed = pushNotificationsSchema.safeParse({
+    enabled,
+    missingPicks,
+    lockerRoomReplies,
+    weekResults,
+    autoPickDigest,
+  });
+  if (!parsed.success) {
+    return { error: "Invalid push notification settings" };
+  }
+
+  const db = getDb();
+
+  try {
+    const currentPreferences = (user.preferences ?? {}) as UserPreferences;
+    const newPreferences: UserPreferences = {
+      ...currentPreferences,
+      pushNotifications: parsed.data,
+    };
+
+    await db
+      .update(users)
+      .set({
+        preferences: newPreferences,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+
+    return { success: true };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Update failed",
+    };
+  }
+}
+
+const subscribePushSchema = z.object({
+  endpoint: z.string().url(),
+  p256dh: z.string().min(1),
+  auth: z.string().min(1),
+  userAgent: z.string().optional(),
+});
+
+type SubscribePushResult = { error: string } | { success: true; id: string };
+
+/**
+ * Upserts on `endpoint` (unique) rather than inserting blindly -- the same
+ * device re-subscribing (its keys can rotate, e.g. after clearing site
+ * data) should update the existing row, not accumulate duplicates that
+ * would each get their own copy of every push.
+ */
+export async function subscribePushAction(
+  subscription: unknown
+): Promise<SubscribePushResult> {
+  const user = await requireAuth();
+
+  const parsed = subscribePushSchema.safeParse(subscription);
+  if (!parsed.success) {
+    return { error: "Invalid push subscription" };
+  }
+
+  const db = getDb();
+
+  try {
+    const [row] = await db
+      .insert(pushSubscriptions)
+      .values({
+        id: generateId(),
+        userId: user.id,
+        endpoint: parsed.data.endpoint,
+        p256dh: parsed.data.p256dh,
+        auth: parsed.data.auth,
+        userAgent: parsed.data.userAgent ?? null,
+      })
+      .onConflictDoUpdate({
+        target: pushSubscriptions.endpoint,
+        set: {
+          userId: user.id,
+          p256dh: parsed.data.p256dh,
+          auth: parsed.data.auth,
+          userAgent: parsed.data.userAgent ?? null,
+          lastFailedAt: null,
+        },
+      })
+      .returning({ id: pushSubscriptions.id });
+
+    return { success: true, id: row.id };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Subscribe failed",
+    };
+  }
+}
+
+type UnsubscribePushResult = { error: string } | { success: true };
+
+export async function unsubscribePushAction(
+  subscriptionId: string
+): Promise<UnsubscribePushResult> {
+  const user = await requireAuth();
+
+  const db = getDb();
+
+  try {
+    await db
+      .delete(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.id, subscriptionId), eq(pushSubscriptions.userId, user.id)));
+
+    return { success: true };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Remove failed",
     };
   }
 }

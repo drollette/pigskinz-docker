@@ -137,6 +137,22 @@ replace.
 At minimum for a working deployment: `SITE_URL`, `SENDGRID_API_KEY` (or email sending just fails —
 picks/login still work), and `INVITATION_CODE`.
 
+## Push notifications
+
+Optional. Every automated email this app sends (pick reminders, auto-pick digests, week results, Locker
+Room mentions/replies, admin broadcasts) has a Web Push equivalent, each with its own opt-out toggle
+under Settings. Without a VAPID keypair configured, email still works fine — the "Push" option in
+Settings just fails to enable.
+
+```bash
+npm run vapid:generate
+```
+
+prints a `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` pair to paste into `.env` — a plain P-256 keypair, the
+same format any other VAPID generator (e.g. `npx web-push generate-vapid-keys`) produces, nothing
+app-specific about it. Restart the app after setting these; existing users can then enable push from
+Settings without needing to do anything else.
+
 ## Database
 
 SQLite via `better-sqlite3` + Drizzle ORM, schema in `src/db/schema.ts`. Migrations are hand-written
@@ -225,6 +241,7 @@ it), `gunzip` it, replace the file in the `pigskinz-data` volume, and start `app
 | Scheduled jobs | `node-cron` in the same process, `src/cron/index.ts` (every 15 min) |
 | Database | SQLite (`better-sqlite3` + Drizzle), one file on the `pigskinz-data` named volume — survives image rebuilds and container recreation, only removed by `docker compose down -v` |
 | Reverse proxy / TLS | Not bundled — bring your own (nginx-proxy-manager, Traefik, Caddy, etc.), see [Reverse proxy](#reverse-proxy) |
+| Push notifications | Web Push via `src/lib/push.ts`, see [Push notifications](#push-notifications) |
 
 See `CLAUDE.md` for the non-obvious constraints (why a custom server, why the cron loop is one process
 instead of a real scheduler, how ESPN syncing works, etc.) — worth reading before making changes.

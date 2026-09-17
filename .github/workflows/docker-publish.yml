@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  # A PR's own branch never lives on main, so its image only ever gets the
+  # "beta" tag below -- nothing here can overwrite the "main"/"latest"
+  # tags a real push produces. Only fires for PRs within this repo, not
+  # forks (GITHUB_TOKEN has no package-write permission on a fork PR
+  # either way).
+  pull_request:
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -27,6 +34,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # "beta" is a moving tag -- always the most recently pushed PR's
+      # build, so testing an in-flight change is just `docker pull
+      # ...:beta` rather than looking up which pr-<N> tag is current.
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -36,6 +46,8 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha
+            type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=beta,enable=${{ github.event_name == 'pull_request' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6

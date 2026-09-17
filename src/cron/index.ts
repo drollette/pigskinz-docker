@@ -9,8 +9,8 @@ import { games } from "../db/schema";
 import { getEnv } from "../lib/env";
 import { runEspnSync } from "../lib/sync-runner";
 import { applyAutoPicks } from "../lib/auto-picks";
-import { sendPickReminders } from "../lib/pick-reminders";
-import { sendWeekResultsEmails } from "../lib/week-results-email";
+import { sendPickReminders, sendPickRemindersPush } from "../lib/pick-reminders";
+import { sendWeekResultsEmails, sendWeekResultsPush } from "../lib/week-results-email";
 
 // Skips the ESPN fetch on ticks where nothing's in progress -- not because
 // of any Cloudflare-style egress block or per-invocation billing (neither
@@ -54,6 +54,18 @@ async function tick(): Promise<void> {
     await sendWeekResultsEmails(env);
   } catch (error) {
     console.error("Scheduled week results email check failed:", error);
+  }
+
+  try {
+    await sendPickRemindersPush(env);
+  } catch (error) {
+    console.error("Scheduled pick reminder push check failed:", error);
+  }
+
+  try {
+    await sendWeekResultsPush(env);
+  } catch (error) {
+    console.error("Scheduled week results push check failed:", error);
   }
 }
 

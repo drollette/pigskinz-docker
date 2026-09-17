@@ -8,6 +8,7 @@ import type { AppEnv } from "@/lib/env";
 import { generateId } from "@/lib/utils";
 import { containsProfanity } from "@/lib/profanity";
 import { sendLockerRoomNotificationEmail, type LockerRoomNotificationKind } from "@/lib/email";
+import { sendPushToUser } from "@/lib/push";
 import { findMentionedUsernames } from "@/lib/mentions";
 import { broadcastToLockerRoom } from "@/realtime/locker-room";
 import { eq } from "drizzle-orm";
@@ -23,70 +24,123 @@ function wantsLockerRoomEmail(preferences: unknown): boolean {
   return (notif?.enabled ?? true) && (notif?.lockerRoomMentions ?? true);
 }
 
+function wantsLockerRoomPush(preferences: unknown): boolean {
+  const prefs = (preferences ?? {}) as UserPreferences;
+  const notif = prefs.pushNotifications;
+  return (notif?.enabled ?? true) && (notif?.lockerRoomReplies ?? true);
+}
+
+function truncateForNotification(body: string, maxLength = 80): string {
+  return body.length > maxLength ? `${body.slice(0, maxLength)}…` : body;
+}
+
 /**
- * Locker Room @mentions/replies only ever email admins -- this is a "get an
- * admin's attention" channel, not a general player-to-player notification
- * system (see getChatMentionCandidates in data.ts for the matching
- * autocomplete restriction). @admin fans out to every admin; @<username>
- * reaches one specific admin; replying to a message an admin sent reaches
- * that admin too -- the sender is excluded from all three so nobody emails
- * themselves. Every email sets Reply-To to the sender's own address, so an
- * admin can just hit "Reply" in their inbox to respond directly to whoever
- * was trying to reach them, entirely through normal email.
+ * Resolves who gets notified about a Locker Room message and through which
+ * channel(s), then sends. Email stays admin-only -- this is still a "get an
+ * admin's attention" channel there: @admin fans out to every admin,
+ * @<username> reaches that admin specifically (a mention of a non-admin's
+ * username is a no-op for email), and replying only counts when the
+ * message being replied to was an admin's. Push is general: @mentioning or
+ * replying to ANY user notifies that user, admin or not (see
+ * getChatMentionCandidates in data.ts, widened to match). The sender is
+ * excluded from both channels so nobody notifies themselves. Every email
+ * sets Reply-To to the sender's own address, so an admin can just hit
+ * "Reply" in their inbox to respond directly, entirely through normal
+ * email; push instead links to /locker-room.
  */
-async function notifyAdmins(
+async function notifyRecipients(
   db: Database,
   env: AppEnv,
-  sender: { id: string; name: string; email: string },
+  sender: { id: string; name: string; username: string | null; email: string },
   messageBody: string,
   replyToId: string | undefined
 ): Promise<void> {
-  const [admins, replyToRow] = await Promise.all([
+  const [allUsers, replyToRow] = await Promise.all([
     db
-      .select({ id: users.id, name: users.name, email: users.email, username: users.username, preferences: users.preferences })
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        username: users.username,
+        isAdmin: users.isAdmin,
+        preferences: users.preferences,
+      })
       .from(users)
-      .where(eq(users.isAdmin, true)),
+      .where(eq(users.isActive, true)),
     replyToId
       ? db.select({ userId: chatMessages.userId }).from(chatMessages).where(eq(chatMessages.id, replyToId)).limit(1)
       : Promise.resolve([]),
   ]);
 
-  const candidateUsernames = ["admin", ...admins.map((a) => a.username).filter((u): u is string => !!u)];
+  const candidateUsernames = ["admin", ...allUsers.map((u) => u.username).filter((u): u is string => !!u)];
   const mentionedUsernames = findMentionedUsernames(messageBody, candidateUsernames);
-  if (mentionedUsernames.size === 0 && !replyToId) return;
+  const replyToAuthorId = replyToRow[0]?.userId;
+  if (mentionedUsernames.size === 0 && !replyToAuthorId) return;
 
-  const recipientKind = new Map<string, LockerRoomNotificationKind>();
-
+  const admins = allUsers.filter((u) => u.isAdmin);
   const mentionsAllAdmins = mentionedUsernames.has("admin");
+  const usersByUsername = new Map(
+    allUsers.filter((u) => u.username).map((u) => [u.username!.toLowerCase(), u])
+  );
+
+  const emailRecipients = new Map<string, LockerRoomNotificationKind>();
   for (const admin of admins) {
     if (admin.id === sender.id) continue;
     if (mentionsAllAdmins || (admin.username && mentionedUsernames.has(admin.username.toLowerCase()))) {
-      recipientKind.set(admin.id, "mention");
+      emailRecipients.set(admin.id, "mention");
     }
   }
+  if (replyToAuthorId && replyToAuthorId !== sender.id && admins.some((a) => a.id === replyToAuthorId)) {
+    emailRecipients.set(replyToAuthorId, "reply");
+  }
 
-  const replyToAuthorId = replyToRow[0]?.userId;
+  const pushRecipients = new Map<string, LockerRoomNotificationKind>();
+  if (mentionsAllAdmins) {
+    for (const admin of admins) {
+      if (admin.id !== sender.id) pushRecipients.set(admin.id, "mention");
+    }
+  }
+  for (const username of mentionedUsernames) {
+    if (username === "admin") continue;
+    const mentioned = usersByUsername.get(username);
+    if (mentioned && mentioned.id !== sender.id) pushRecipients.set(mentioned.id, "mention");
+  }
   if (replyToAuthorId && replyToAuthorId !== sender.id) {
-    // Only counts if the message being replied to was an admin's -- a
-    // reply to an ordinary player's message stays purely in-app.
-    if (admins.some((a) => a.id === replyToAuthorId)) {
-      recipientKind.set(replyToAuthorId, "reply");
-    }
+    pushRecipients.set(replyToAuthorId, "reply");
   }
 
-  const adminsById = new Map(admins.map((a) => [a.id, a]));
+  const usersById = new Map(allUsers.map((u) => [u.id, u]));
 
-  for (const [adminId, kind] of recipientKind) {
-    const admin = adminsById.get(adminId);
-    if (!admin || !wantsLockerRoomEmail(admin.preferences)) continue;
+  for (const [userId, kind] of emailRecipients) {
+    const recipient = usersById.get(userId);
+    if (!recipient || !wantsLockerRoomEmail(recipient.preferences)) continue;
 
     try {
-      await sendLockerRoomNotificationEmail(admin.email, admin.name, sender.name, messageBody, kind, env, {
+      await sendLockerRoomNotificationEmail(recipient.email, recipient.name, sender.name, messageBody, kind, env, {
         email: sender.email,
         name: sender.name,
       });
     } catch (error) {
-      console.error(`Failed to send Locker Room ${kind} notification to ${admin.email}:`, error);
+      console.error(`Failed to send Locker Room ${kind} email to ${recipient.email}:`, error);
+    }
+  }
+
+  for (const [userId, kind] of pushRecipients) {
+    const recipient = usersById.get(userId);
+    if (!recipient || !wantsLockerRoomPush(recipient.preferences)) continue;
+
+    try {
+      await sendPushToUser(db, env, userId, {
+        title: kind === "reply" ? "New reply in Locker Room" : "Mentioned in Locker Room",
+        // Same username-over-real-name convention as the chat UI itself
+        // (see m.username ?? m.name in locker-room-chat.tsx) -- push reaches
+        // any mentioned/replied-to user, not just admins, so it can't leak
+        // a real name the Locker Room deliberately keeps anonymous.
+        body: `${sender.username ?? sender.name}: ${truncateForNotification(messageBody)}`,
+        url: "/locker-room",
+      });
+    } catch (error) {
+      console.error(`Failed to send Locker Room ${kind} push to user ${userId}:`, error);
     }
   }
 }
@@ -159,11 +213,17 @@ export async function sendChatMessageAction(
     });
 
     try {
-      await notifyAdmins(db, getEnv(), { id: user.id, name: user.name, email: user.email }, trimmed, replyTo?.id);
+      await notifyRecipients(
+        db,
+        getEnv(),
+        { id: user.id, name: user.name, username: user.username, email: user.email },
+        trimmed,
+        replyTo?.id
+      );
     } catch (error) {
       // Never fail the send over a notification problem -- the message is
       // already saved and broadcast at this point.
-      console.error("notifyAdmins error:", error);
+      console.error("notifyRecipients error:", error);
     }
 
     return { success: true };

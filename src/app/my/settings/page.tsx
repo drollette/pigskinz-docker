@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
+import { getDb, getEnv } from "@/lib/env";
+import { pushSubscriptions } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { Card, CardBody, CardTitle } from "@/components/ui";
 import { ProfileForm } from "./profile-form";
 import { EmailForm } from "./email-form";
@@ -7,7 +10,7 @@ import { UsernameForm } from "./username-form";
 import { PasswordForm } from "./password-form";
 import { ThemeForm } from "./theme-form";
 import { AutoPickForm } from "./auto-pick-form";
-import { EmailNotificationsForm } from "./email-notifications-form";
+import { NotificationsForm } from "./notifications-form";
 import { InstallAppInstructions } from "./install-app-instructions";
 import type { UserPreferences } from "@/db/schema";
 import { POOL_NAME } from "@/lib/site-config";
@@ -20,6 +23,16 @@ export default async function SettingsPage() {
   }
 
   const preferences = (user.preferences ?? {}) as UserPreferences;
+
+  const db = getDb();
+  const devices = await db
+    .select({
+      id: pushSubscriptions.id,
+      userAgent: pushSubscriptions.userAgent,
+      createdAt: pushSubscriptions.createdAt,
+    })
+    .from(pushSubscriptions)
+    .where(eq(pushSubscriptions.userId, user.id));
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -67,17 +80,35 @@ export default async function SettingsPage() {
           </CardBody>
         </Card>
 
-        {/* Email Notification Settings */}
+        {/* Notification Settings */}
+        {/* id kept as "email-notifications" -- already-sent emails link here
+            (src/lib/email.ts's footer) and that link can't be updated after
+            the fact. */}
         <Card id="email-notifications" className="scroll-mt-20">
           <CardBody>
-            <CardTitle className="mb-4">Email Notifications</CardTitle>
-            <EmailNotificationsForm
+            <CardTitle className="mb-4">Notifications</CardTitle>
+            <NotificationsForm
               isAdmin={!!user.isAdmin}
-              initialEnabled={preferences.emailNotifications?.enabled ?? true}
-              initialPickReminders={preferences.emailNotifications?.pickReminders ?? true}
-              initialAutoPickDigest={preferences.emailNotifications?.autoPickDigest ?? true}
-              initialLockerRoomMentions={preferences.emailNotifications?.lockerRoomMentions ?? true}
-              initialWeekResults={preferences.emailNotifications?.weekResults ?? true}
+              vapidPublicKey={getEnv().VAPID_PUBLIC_KEY}
+              initialEmail={{
+                enabled: preferences.emailNotifications?.enabled ?? true,
+                pickReminders: preferences.emailNotifications?.pickReminders ?? true,
+                autoPickDigest: preferences.emailNotifications?.autoPickDigest ?? true,
+                lockerRoomMentions: preferences.emailNotifications?.lockerRoomMentions ?? true,
+                weekResults: preferences.emailNotifications?.weekResults ?? true,
+              }}
+              initialPush={{
+                enabled: preferences.pushNotifications?.enabled ?? true,
+                missingPicks: preferences.pushNotifications?.missingPicks ?? true,
+                lockerRoomReplies: preferences.pushNotifications?.lockerRoomReplies ?? true,
+                weekResults: preferences.pushNotifications?.weekResults ?? true,
+                autoPickDigest: preferences.pushNotifications?.autoPickDigest ?? true,
+              }}
+              initialDevices={devices.map((d) => ({
+                id: d.id,
+                userAgent: d.userAgent,
+                createdAt: d.createdAt ? d.createdAt.toISOString() : null,
+              }))}
             />
           </CardBody>
         </Card>
