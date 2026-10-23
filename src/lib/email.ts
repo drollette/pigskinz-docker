@@ -1,5 +1,6 @@
 import { getEnv, type AppEnv } from "./env";
-import { SITE_URL, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME, POOL_NAME, LEAGUESAFE_URL, BUYIN_AMOUNT, BUYIN_DEADLINE, PAYOUT_INFO } from "./site-config";
+import { SITE_URL, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME, POOL_NAME, LEAGUESAFE_URL, BUYIN_DEADLINE } from "./site-config";
+import type { PrizeSplit } from "./prize-pool";
 
 interface SendEmailParams {
   to: string;
@@ -191,7 +192,7 @@ export async function sendVerificationEmail(
   });
 }
 
-export function getWelcomeEmailHtml(name: string): string {
+export function getWelcomeEmailHtml(name: string, buyInDollars: number, split: PrizeSplit): string {
   return `
 <!DOCTYPE html>
 <html>
@@ -215,7 +216,7 @@ export function getWelcomeEmailHtml(name: string): string {
           ? `<div style="background-color: #f4f4f5; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
         <h3 style="color: #18181b; margin: 0 0 8px 0; font-size: 16px;">Buy-In</h3>
         <p style="color: #3f3f46; margin: 0 0 12px 0; line-height: 1.5; font-size: 14px;">
-          ${BUYIN_AMOUNT ? `${BUYIN_AMOUNT} for the season, collected` : "Collected"} through <strong>LeagueSafe</strong> — the top-rated,
+          $${buyInDollars} for the season, collected through <strong>LeagueSafe</strong> — the top-rated,
           trusted platform for fantasy sports pools since 2008.
         </p>
         ${
@@ -235,7 +236,8 @@ export function getWelcomeEmailHtml(name: string): string {
           : ""
       }
       <p style="color: #3f3f46; margin: 0 0 24px 0; line-height: 1.5; font-size: 14px;">
-        ${PAYOUT_INFO}
+        Payouts: <strong>${split.first}%</strong> to 1st place, <strong>${split.second}%</strong> to 2nd, <strong>${split.third}%</strong>
+        to 3rd, based on final season standings.
       </p>
       <div style="text-align: center;">
         <a href="${SITE_URL}/rules" style="display: inline-block; background-color: #1d4ed8; color: #ffffff; text-decoration: none; padding: 12px 32px; border-radius: 6px; font-weight: 500;">
@@ -254,7 +256,7 @@ export function getWelcomeEmailHtml(name: string): string {
   `.trim();
 }
 
-export function getWelcomeEmailText(name: string): string {
+export function getWelcomeEmailText(name: string, buyInDollars: number, split: PrizeSplit): string {
   return `
 Hi ${name},
 
@@ -263,14 +265,14 @@ ${
   LEAGUESAFE_URL
     ? `
 BUY-IN
-${BUYIN_AMOUNT ? `${BUYIN_AMOUNT} for the season, collected` : "Collected"} through LeagueSafe — the top-rated, trusted platform for fantasy sports pools since 2008.
+$${buyInDollars} for the season, collected through LeagueSafe — the top-rated, trusted platform for fantasy sports pools since 2008.
 ${BUYIN_DEADLINE ? `\nBuy-in is due by ${BUYIN_DEADLINE}. LeagueSafe does not accept payments after the deadline, so don't wait until the last minute.\n` : ""}
 Pay your buy-in: ${LEAGUESAFE_URL}
 `
     : ""
 }
 PAYOUTS
-${PAYOUT_INFO}
+${split.first}% to 1st place, ${split.second}% to 2nd, ${split.third}% to 3rd, based on final season standings.
 
 Full rules: ${SITE_URL}/rules
 
@@ -278,12 +280,12 @@ Full rules: ${SITE_URL}/rules
   `.trim();
 }
 
-export async function sendWelcomeEmail(email: string, name: string) {
+export async function sendWelcomeEmail(email: string, name: string, buyInDollars: number, split: PrizeSplit) {
   await sendEmail({
     to: email,
     subject: `Welcome to ${POOL_NAME}!`,
-    html: getWelcomeEmailHtml(name),
-    text: getWelcomeEmailText(name),
+    html: getWelcomeEmailHtml(name, buyInDollars, split),
+    text: getWelcomeEmailText(name, buyInDollars, split),
   });
 }
 

@@ -83,6 +83,66 @@ export async function updateHomeMessageAction(message: string): Promise<ActionRe
 }
 
 /**
+ * The whole prize pool configuration in one save -- buy-in amount, the
+ * 1st/2nd/3rd split, and whether the banner (prize-pot-banner.tsx) shows at
+ * all. The buy-in and split also drive the Rules page and welcome email.
+ */
+export async function updatePrizePoolSettingsAction(
+  buyInDollars: number,
+  enabled: boolean,
+  firstPercent: number,
+  secondPercent: number,
+  thirdPercent: number
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  if (!Number.isInteger(buyInDollars) || buyInDollars < 1 || buyInDollars > 10000) {
+    return { error: "Buy-in must be a whole dollar amount between $1 and $10,000" };
+  }
+  if (
+    ![firstPercent, secondPercent, thirdPercent].every((p) => Number.isInteger(p) && p >= 0 && p <= 100)
+  ) {
+    return { error: "Each place's percentage must be a whole number between 0 and 100" };
+  }
+  if (firstPercent + secondPercent + thirdPercent !== 100) {
+    return { error: "1st + 2nd + 3rd must add up to 100%" };
+  }
+
+  const db = getDb();
+
+  try {
+    await db
+      .insert(siteSettings)
+      .values({
+        id: SITE_SETTINGS_ID,
+        buyInDollars,
+        prizeBarEnabled: enabled,
+        prizeFirstPercent: firstPercent,
+        prizeSecondPercent: secondPercent,
+        prizeThirdPercent: thirdPercent,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: siteSettings.id,
+        set: {
+          buyInDollars,
+          prizeBarEnabled: enabled,
+          prizeFirstPercent: firstPercent,
+          prizeSecondPercent: secondPercent,
+          prizeThirdPercent: thirdPercent,
+          updatedAt: new Date(),
+        },
+      });
+    return { success: true };
+  } catch (error) {
+    console.error("Update prize pool settings error:", error);
+    return {
+      error: error instanceof Error ? error.message : "Failed to update prize pool settings",
+    };
+  }
+}
+
+/**
  * The source template for the automated week-results email (see
  * src/lib/week-results-email.ts, which reads these same two columns
  * directly off site_settings). Clearing the subject or body doesn't
