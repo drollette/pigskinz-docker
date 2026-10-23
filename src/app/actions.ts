@@ -5,6 +5,7 @@ import { destroySession, requireAuth } from "@/lib/auth";
 import { getDb } from "@/lib/env";
 import { users, type UserPreferences, type SidePanelType } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { getPointsProgression, type UserPointsProgression } from "@/lib/data";
 
 export async function logoutAction() {
   await destroySession();
@@ -67,5 +68,29 @@ export async function updateColumnsAction(
   } catch (error) {
     console.error("updateColumnsAction error:", error);
     return { success: false, error: "Failed to save layout" };
+  }
+}
+
+// Fetched on demand (opening the season standings' "compare players" modal)
+// rather than with the page load, since it's a heavier per-user/per-week
+// computation the standings table itself doesn't need.
+export async function getPointsProgressionAction(
+  seasonType: number,
+  userIds: string[]
+): Promise<{ success: true; data: UserPointsProgression[] } | { success: false; error: string }> {
+  try {
+    await requireAuth();
+
+    // Matches the chart's own display cap -- see PlayerCompareModal.
+    const dedupedIds = Array.from(new Set(userIds)).slice(0, 8);
+    if (dedupedIds.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    const data = await getPointsProgression(seasonType, dedupedIds);
+    return { success: true, data };
+  } catch (error) {
+    console.error("getPointsProgressionAction error:", error);
+    return { success: false, error: "Failed to load points comparison" };
   }
 }

@@ -14,7 +14,7 @@ import {
   Cell,
 } from "recharts";
 
-const COLORS = [
+export const COLORS = [
   "#22c55e", // green
   "#3b82f6", // blue
   "#f59e0b", // amber
