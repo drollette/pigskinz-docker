@@ -13,6 +13,7 @@ import {
 } from "@/lib/nfl-standings";
 import type { Conference } from "@/lib/nfl-divisions";
 import { hasGameStarted } from "@/lib/game-helpers";
+import { DEFAULT_BUY_IN_DOLLARS, DEFAULT_PRIZE_SPLIT, type PrizeSplit } from "@/lib/prize-pool";
 
 // Re-exported for existing callers -- see game-helpers.ts for why client
 // components must import this from there directly instead of from here.
@@ -200,6 +201,11 @@ export interface TeamData {
   logo: string | null;
   score: number | null;
   isWinner?: boolean;
+  /** Season record ("W-L-T", e.g. "6-7-0") and current streak (e.g. "W2",
+   * "L1"), shown together next to the logo as "(6-7-0/W3)". Only populated
+   * by getGamesForWeek; other TeamData call sites leave these undefined. */
+  record?: string | null;
+  streak?: string | null;
 }
 
 export interface GameData {
@@ -215,6 +221,9 @@ export interface GameData {
   awayTeam: TeamData;
   odds: string;
   overUnder: number | null;
+  /** Broadcasting network(s), e.g. "CBS" or "NBC/Peacock". Shown on the
+   * schedule page only. */
+  network: string | null;
 }
 
 export interface WeekInfo {
@@ -298,6 +307,36 @@ export async function getFirstRegularSeasonGameDate(): Promise<Date | null> {
   return result[0]?.date ?? null;
 }
 
+interface TeamRecordStreak {
+  record: string; // "W-L-T", e.g. "6-7-0"
+  streak: string; // e.g. "W2", "-" if no games played yet
+}
+
+/** Each team's current W-L-T record and streak, derived the same way as
+ * the standings page (completed regular-season games only). Shared by
+ * getGamesForWeek so the game cards can show it next to the logo. */
+async function getTeamRecordStreakMap(
+  allTeams: (typeof teams.$inferSelect)[]
+): Promise<Map<string, TeamRecordStreak>> {
+  const db = getDb();
+  const allGames = await db
+    .select({
+      homeTeamId: games.homeTeamId,
+      awayTeamId: games.awayTeamId,
+      homeTeamScore: games.homeTeamScore,
+      awayTeamScore: games.awayTeamScore,
+      completed: games.completed,
+      seasonType: games.seasonType,
+      date: games.date,
+    })
+    .from(games);
+
+  const { rows } = computeNFLStandings(allGames, allTeams);
+  return new Map(
+    rows.map((r) => [r.teamId, { record: `${r.wins}-${r.losses}-${r.ties}`, streak: r.streak }])
+  );
+}
+
 /**
  * Get games for a specific week from the database
  */
@@ -333,6 +372,7 @@ export async function getGamesForWeek(
   // Fetch all away teams for these games
   const allTeams = await db.select().from(teams);
   const teamsMap = new Map(allTeams.map(t => [t.id, t]));
+  const recordStreakMap = await getTeamRecordStreakMap(allTeams);
 
   return gamesData.map(({ game }) => {
     const homeTeam = teamsMap.get(game.homeTeamId);
@@ -369,6 +409,8 @@ export async function getGamesForWeek(
         logo: homeTeam.logo,
         score: game.homeTeamScore,
         isWinner: homeIsWinner,
+        record: recordStreakMap.get(homeTeam.id)?.record ?? null,
+        streak: recordStreakMap.get(homeTeam.id)?.streak ?? null,
       },
       awayTeam: {
         id: awayTeam.id,
@@ -381,9 +423,12 @@ export async function getGamesForWeek(
         logo: awayTeam.logo,
         score: game.awayTeamScore,
         isWinner: awayIsWinner,
+        record: recordStreakMap.get(awayTeam.id)?.record ?? null,
+        streak: recordStreakMap.get(awayTeam.id)?.streak ?? null,
       },
       odds: game.odds || "Odds Not Available",
       overUnder: game.overUnder,
+      network: game.network,
     };
   });
 }
@@ -473,6 +518,7 @@ export async function getGamesForTeam(teamId: string): Promise<{
       },
       odds: game.odds || "Odds Not Available",
       overUnder: game.overUnder,
+      network: game.network,
     };
   };
 
@@ -575,6 +621,7 @@ export async function getGameById(gameId: string): Promise<GameData | null> {
     },
     odds: game.odds || "Odds Not Available",
     overUnder: game.overUnder,
+    network: game.network,
   };
 }
 
@@ -656,6 +703,7 @@ export async function getTiebreakerGame(
     },
     odds: game.odds || "Odds Not Available",
     overUnder: game.overUnder,
+    network: game.network,
   };
 }
 
@@ -832,11 +880,83 @@ export async function getAllPicksForWeek(
     .where(
       and(
         eq(picks.seasonType, seasonType),
-        eq(picks.weekNumber, weekNumber)
+        eq(picks.weekNumber, weekNumber),
+        // A paused (dues-not-paid) user's own historical pick shouldn't keep
+        // showing up in the "Picks by Game" results card -- they're already
+        // excluded from the standings tables above, and getWeeklyStandings'
+        // allUsers roster (pool-standings-view.tsx) already won't list them
+        // as "missing" a pick either, so leaving their pick visible here
+        // would be the one place they weren't actually removed from.
+        eq(users.isActive, true)
       )
     );
 
   return results;
+}
+
+/**
+ * How many users have actually paid their buy-in -- the prize pot
+ * (src/lib/prize-pool.ts) is this count times the buy-in amount.
+ * Deliberately `hasPaid`, not `isActive`: `hasPaid` is the admin's explicit
+ * "this person's money is in the pot" flag (toggled separately in the User
+ * Management table), while `isActive` is the competitive-participation
+ * gate (CLAUDE.md) -- a user who paid and was later deactivated for an
+ * unrelated reason (or vice versa, marked inactive for non-payment before
+ * ever toggling hasPaid) still contributed real money either way, so the
+ * pot has to track payment, not participation.
+ */
+export async function getPaidPlayerCount(): Promise<number> {
+  const db = getDb();
+  const rows = await db.select({ id: users.id }).from(users).where(eq(users.hasPaid, true));
+  return rows.length;
+}
+
+/** The admin-editable season buy-in amount (whole dollars), or the default
+ * if an admin has never set one. See src/lib/prize-pool.ts. */
+export async function getBuyInDollars(): Promise<number> {
+  const db = getDb();
+  const result = await db
+    .select({ buyInDollars: siteSettings.buyInDollars })
+    .from(siteSettings)
+    .where(eq(siteSettings.id, SITE_SETTINGS_ID))
+    .limit(1);
+  return result[0]?.buyInDollars ?? DEFAULT_BUY_IN_DOLLARS;
+}
+
+export interface PrizePoolSettings {
+  /** Admin kill switch for the prize pot banner -- independent of the
+   * banner's own "hide until someone's paid" check. */
+  enabled: boolean;
+  buyInDollars: number;
+  split: PrizeSplit;
+}
+
+/** Every admin-editable prize pool setting in one read, for the banner and
+ * the admin dashboard's own "Prize Pool" form. See src/lib/prize-pool.ts
+ * for the fallback defaults and the pot/payout math itself. */
+export async function getPrizePoolSettings(): Promise<PrizePoolSettings> {
+  const db = getDb();
+  const result = await db
+    .select({
+      buyInDollars: siteSettings.buyInDollars,
+      first: siteSettings.prizeFirstPercent,
+      second: siteSettings.prizeSecondPercent,
+      third: siteSettings.prizeThirdPercent,
+      enabled: siteSettings.prizeBarEnabled,
+    })
+    .from(siteSettings)
+    .where(eq(siteSettings.id, SITE_SETTINGS_ID))
+    .limit(1);
+  const row = result[0];
+  return {
+    enabled: row?.enabled ?? true,
+    buyInDollars: row?.buyInDollars ?? DEFAULT_BUY_IN_DOLLARS,
+    split: {
+      first: row?.first ?? DEFAULT_PRIZE_SPLIT.first,
+      second: row?.second ?? DEFAULT_PRIZE_SPLIT.second,
+      third: row?.third ?? DEFAULT_PRIZE_SPLIT.third,
+    },
+  };
 }
 
 
@@ -1059,6 +1179,95 @@ export async function getOverallStandings(seasonType: number) {
     ranked.push({ ...s, rank: tiedWithPrevious ? previous.rank : i + 1 });
   }
   return ranked;
+}
+
+export interface WeeklyPointsBreakdown {
+  weekNumber: number;
+  correctPicks: number;
+  firstBonus: number;
+  secondBonus: number;
+  tiebreakerBonus: number;
+  weekPoints: number;
+  cumulativePoints: number;
+}
+
+export interface UserPointsProgression {
+  userId: string;
+  userName: string | null;
+  username: string | null;
+  weeks: WeeklyPointsBreakdown[];
+}
+
+/** Per-week points breakdown (correct picks + weekly 1st/2nd + closest-
+ * tiebreaker bonuses, running cumulative total) for the given users, for
+ * the season-standings "compare players" chart+table. Only includes weeks
+ * that are fully graded (picksSummary.rank set -- see getOverallStandings),
+ * same as the season points total this is meant to build up to exactly. */
+export async function getPointsProgression(
+  seasonType: number,
+  userIds: string[]
+): Promise<UserPointsProgression[]> {
+  const db = getDb();
+  if (userIds.length === 0) return [];
+
+  const [requestedUsers, userSummaries, allGradedSummaries] = await Promise.all([
+    db.select({ id: users.id, name: users.name, username: users.username }).from(users).where(inArray(users.id, userIds)),
+    db
+      .select({
+        userId: picksSummary.userId,
+        weekNumber: picksSummary.weekNumber,
+        rank: picksSummary.rank,
+        tiebreakerDiff: picksSummary.tiebreakerDiff,
+        correctPicksCount: picksSummary.correctPicksCount,
+      })
+      .from(picksSummary)
+      .where(
+        and(inArray(picksSummary.userId, userIds), eq(picksSummary.seasonType, seasonType), isNotNull(picksSummary.rank))
+      )
+      .orderBy(asc(picksSummary.weekNumber)),
+    // Closest-tiebreaker bonus is relative to the whole pool's guesses that
+    // week, not just the requested users -- same reasoning as the identical
+    // query in getOverallStandings.
+    db
+      .select({ weekNumber: picksSummary.weekNumber, tiebreakerDiff: picksSummary.tiebreakerDiff })
+      .from(picksSummary)
+      .where(
+        and(eq(picksSummary.seasonType, seasonType), isNotNull(picksSummary.rank), isNotNull(picksSummary.tiebreakerDiff))
+      ),
+  ]);
+
+  const closestDiffByWeek = new Map<number, number>();
+  for (const s of allGradedSummaries) {
+    if (s.tiebreakerDiff === null) continue;
+    const current = closestDiffByWeek.get(s.weekNumber);
+    if (current === undefined || s.tiebreakerDiff < current) {
+      closestDiffByWeek.set(s.weekNumber, s.tiebreakerDiff);
+    }
+  }
+
+  const summariesByUser = new Map<string, typeof userSummaries>();
+  for (const s of userSummaries) {
+    const list = summariesByUser.get(s.userId);
+    if (list) list.push(s);
+    else summariesByUser.set(s.userId, [s]);
+  }
+
+  return requestedUsers.map((u) => {
+    const summaries = summariesByUser.get(u.id) ?? [];
+    let cumulativePoints = 0;
+    const weeks: WeeklyPointsBreakdown[] = summaries.map((s) => {
+      const correctPicks = s.correctPicksCount ?? 0;
+      const firstBonus = s.rank === 1 ? 2 : 0;
+      const secondBonus = s.rank === 2 ? 1 : 0;
+      const tiebreakerBonus =
+        s.tiebreakerDiff !== null && s.tiebreakerDiff === closestDiffByWeek.get(s.weekNumber) ? 1 : 0;
+      const weekPoints = correctPicks + firstBonus + secondBonus + tiebreakerBonus;
+      cumulativePoints += weekPoints;
+      return { weekNumber: s.weekNumber, correctPicks, firstBonus, secondBonus, tiebreakerBonus, weekPoints, cumulativePoints };
+    });
+
+    return { userId: u.id, userName: u.name, username: u.username, weeks };
+  });
 }
 
 /**
