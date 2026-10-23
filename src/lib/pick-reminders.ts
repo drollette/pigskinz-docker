@@ -58,7 +58,7 @@ function getTimezoneOffsetMinutes(date: Date, timeZone: string): number {
   // "start of day" computation, making it a moving target — since `now` at
   // each cron tick has essentially random milliseconds, `isSameEasternDay`
   // almost never matched the previously-saved send time, and pick reminders
-  // went out on every single 15-minute tick instead of once a day.
+  // went out on every single 5-minute tick instead of once a day.
   return Math.round((asUTC - date.getTime()) / 60000);
 }
 
@@ -162,13 +162,13 @@ export function isSameEasternDay(a: Date, b: Date): boolean {
  * Sends one reminder email per user with missing picks for a game later
  * today, at most once per user per (US Eastern) day — gated by
  * users.lastPickReminderSentAt rather than by a fixed send time, so this
- * can just run on the same 15-minute production cron that already gates
+ * can just run on the same 5-minute production cron that already gates
  * the ESPN sync (see worker.ts) without any extra scheduling.
  *
  * `usersWithMissingPicks`, when passed, skips the games/users/picks query
  * this function would otherwise run itself -- src/cron/index.ts computes it
  * once and hands the same result to both this and sendPickRemindersPush,
- * since both would otherwise redo the identical query on every 15-minute
+ * since both would otherwise redo the identical query on every 5-minute
  * tick, all season.
  */
 export async function sendPickReminders(

@@ -2,12 +2,18 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "react-hot-toast";
 import { Navbar } from "@/components/navbar";
 import { HomeMessageBanner } from "@/components/home-message-banner";
+import { PushPermissionBanner } from "@/components/push-permission-banner";
+import { PrizePotBanner } from "@/components/prize-pot-banner";
 import { Footer } from "@/components/footer";
 import { PWAProvider } from "@/components/pwa-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeScript } from "@/components/theme-script";
 import { getCurrentUser } from "@/lib/auth";
-import { getCurrentWeekFromDb, getHomeMessage } from "@/lib/data";
+import { getCurrentWeekFromDb, getHomeMessage, getPaidPlayerCount, getPrizePoolSettings } from "@/lib/data";
+import { getDb, getEnv } from "@/lib/env";
+import { pushSubscriptions } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { calculatePrizePot, DEFAULT_BUY_IN_DOLLARS, DEFAULT_PRIZE_SPLIT } from "@/lib/prize-pool";
 import { blackOpsOne, radioCanadaBig } from "@/lib/fonts";
 import { POOL_NAME } from "@/lib/site-config";
 import "./globals.css";
@@ -62,7 +68,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [user, weekData, homeMessage] = await Promise.all([
+  const [user, weekData, homeMessage, paidPlayers, prizePoolSettings] = await Promise.all([
     getCurrentUser().catch(() => null),
     getCurrentWeekFromDb().catch(() => ({
       week: 1,
@@ -70,13 +76,34 @@ export default async function RootLayout({
       year: new Date().getFullYear(),
     })),
     getHomeMessage().catch(() => null),
+    getPaidPlayerCount().catch(() => 0),
+    getPrizePoolSettings().catch(() => ({
+      enabled: true,
+      buyInDollars: DEFAULT_BUY_IN_DOLLARS,
+      split: DEFAULT_PRIZE_SPLIT,
+    })),
   ]);
+  const prizePot = calculatePrizePot(paidPlayers, prizePoolSettings.buyInDollars, prizePoolSettings.split);
 
   const currentWeek = weekData.week;
   const currentSeasonType = weekData.seasonType;
 
   // Get user's theme preference, default to system
   const userTheme = user?.preferences?.theme ?? "system";
+
+  // Only worth a round trip for a signed-in, verified user who could
+  // actually see the push banner below -- an unverified user isn't yet a
+  // real participant (see CLAUDE.md's product model), and this is on every
+  // page load app-wide, not just /my/settings.
+  let showPushBanner = false;
+  if (user && user.emailVerified) {
+    const existingDevice = await getDb()
+      .select({ id: pushSubscriptions.id })
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, user.id))
+      .limit(1);
+    showPushBanner = existingDevice.length === 0;
+  }
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -101,6 +128,8 @@ export default async function RootLayout({
               currentWeek={currentWeek}
               currentSeasonType={currentSeasonType}
             />
+            {prizePoolSettings.enabled && <PrizePotBanner {...prizePot} />}
+            {showPushBanner && <PushPermissionBanner vapidPublicKey={getEnv().VAPID_PUBLIC_KEY} />}
             {homeMessage && <HomeMessageBanner message={homeMessage} />}
             <main className="py-4 pb-12">
               {/* max-w-7xl (1280px) left huge symmetric dead margins on the

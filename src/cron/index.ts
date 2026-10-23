@@ -1,7 +1,16 @@
 // Replaces the Cloudflare Worker cron trigger this app was ported from (see
-// worker.ts's `scheduled` handler in the original). Runs every 15 minutes in
+// worker.ts's `scheduled` handler in the original). Runs every 5 minutes in
 // this same long-lived process instead of as a separate Workers invocation --
 // there's no separate scheduler to wire up in a single-container deployment.
+//
+// The Cloudflare original splits this into two schedules (every 5 minutes
+// on Sunday, every 15 minutes the rest of the week) specifically to limit
+// GitHub Actions minutes: its sync-espn.yml dispatch is billed per
+// invocation, so a tighter cadence only made sense on the day most games
+// overlap. That constraint doesn't exist here -- ESPN is fetched directly
+// in-process (see "ESPN is fetched directly" below), so there's no billed
+// dispatch to ration -- a single 5-minute cadence every day is simpler and
+// gives every day Sunday-grade freshness, not just Sunday.
 import cron from "node-cron";
 import { and, eq, lte, count } from "drizzle-orm";
 import { db } from "../db";
@@ -87,7 +96,7 @@ async function tick(): Promise<void> {
 }
 
 export function startCronLoop(): void {
-  cron.schedule("*/15 * * * *", () => {
+  cron.schedule("*/5 * * * *", () => {
     tick().catch((error) => console.error("Cron tick failed:", error));
   });
 }
