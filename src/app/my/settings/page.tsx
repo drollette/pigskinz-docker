@@ -10,6 +10,7 @@ import { UsernameForm } from "./username-form";
 import { PasswordForm } from "./password-form";
 import { ThemeForm } from "./theme-form";
 import { AutoPickForm } from "./auto-pick-form";
+import { PicksDisplayForm } from "./picks-display-form";
 import { NotificationsForm } from "./notifications-form";
 import { InstallAppInstructions } from "./install-app-instructions";
 import type { UserPreferences } from "@/db/schema";
@@ -66,6 +67,22 @@ export default async function SettingsPage() {
               Add {POOL_NAME} to your home screen for quick access, like a regular app.
             </p>
             <InstallAppInstructions />
+          </CardBody>
+        </Card>
+
+        {/* Picks Display Settings */}
+        <Card>
+          <CardBody>
+            <CardTitle className="mb-4">Picks Display</CardTitle>
+            <p className="text-base-content/60 text-sm mb-4">
+              Choose what&apos;s shown next to each matchup while you make your picks.
+            </p>
+            <PicksDisplayForm
+              initial={{
+                showStats: preferences.picksDisplay?.showStats ?? true,
+                showOdds: preferences.picksDisplay?.showOdds ?? true,
+              }}
+            />
           </CardBody>
         </Card>
 

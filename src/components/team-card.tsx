@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatRecordStreak } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 
 interface TeamCardProps {
@@ -12,6 +12,11 @@ interface TeamCardProps {
     logo?: string | null;
     score?: number | null;
     isWinner?: boolean;
+    /** Season record ("W-L-T"), shown with streak below the logo as
+     * "(6-7-0/W3)". */
+    record?: string | null;
+    /** Current W/L/T streak (e.g. "W2"), shown with record below the logo. */
+    streak?: string | null;
   };
   completed?: boolean;
   selected?: boolean;
@@ -25,6 +30,8 @@ interface TeamCardProps {
   /** Point spread (e.g. "-3.5"), shown under the abbreviation only for the
    * favored team so it's visually tied to the side it actually applies to. */
   spread?: string | null;
+  /** Whether to show the record/streak line (user preference). */
+  showStats?: boolean;
 }
 
 export function TeamCard({
@@ -37,6 +44,7 @@ export function TeamCard({
   userName,
   userPickCorrect = null,
   spread,
+  showStats = true,
 }: TeamCardProps) {
   const isWinner = team.isWinner;
   const isFaded = completed && !isWinner;
@@ -44,6 +52,7 @@ export function TeamCard({
 
   // Use ESPN CDN logo URL - external source to avoid copyright concerns
   const logoUrl = team.logo || `https://a.espncdn.com/i/teamlogos/nfl/500/${team.abbreviation.toLowerCase()}.png`;
+  const recordStreak = showStats ? formatRecordStreak(team.record, team.streak) : null;
 
   return (
     <button
@@ -92,6 +101,9 @@ export function TeamCard({
           )}
         </div>
       )}
+      {spread && (
+        <div className="text-center text-[10px] @sm:text-xs text-base-content/50 mb-1">{spread}</div>
+      )}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={logoUrl}
@@ -102,13 +114,15 @@ export function TeamCard({
         loading="lazy"
         referrerPolicy="no-referrer"
       />
-      {team.displayName && (
-        <div className="text-center mt-2 text-xs @sm:text-sm font-medium text-base-content">
-          {team.abbreviation}
+      {recordStreak && (
+        <div className="text-center mt-1 text-[9px] @sm:text-[10px] font-mono text-base-content/50">
+          {recordStreak}
         </div>
       )}
-      {spread && (
-        <div className="text-center text-[10px] @sm:text-xs text-base-content/50">{spread}</div>
+      {team.displayName && (
+        <div className="text-center mt-0.5 text-xs @sm:text-sm font-medium text-base-content">
+          {team.abbreviation}
+        </div>
       )}
     </button>
   );

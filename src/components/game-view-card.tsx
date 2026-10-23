@@ -1,7 +1,7 @@
 "use client";
 
 import { HelpCircle } from "lucide-react";
-import { cn, favoredSide } from "@/lib/utils";
+import { cn, favoredSide, formatRecordStreak } from "@/lib/utils";
 import { formatGameDate, formatGameTime } from "@/lib/utils";
 import { blackOpsOne } from "@/lib/fonts";
 import type { GameData } from "@/lib/data";
@@ -45,6 +45,7 @@ export function GameViewCard({ game }: GameViewCardProps) {
 
       <div className="flex justify-between text-xs @sm:text-sm text-base-content/60 mt-1">
         <span>{formatGameDate(gameDate)}</span>
+        {game.network && <span className="font-medium">{game.network}</span>}
         <span>{formatGameTime(gameDate)}</span>
       </div>
 
@@ -65,17 +66,22 @@ export function GameViewCard({ game }: GameViewCardProps) {
             </>
           ) : (
             <>
+              {favorite === "away" && spreadValue && (
+                <span className="text-[10px] @sm:text-xs text-base-content/50">{spreadValue}</span>
+              )}
               <img
                 src={game.awayTeam.logo ?? ""}
                 alt={game.awayTeam.name}
                 className="w-14 h-14 @sm:w-20 @sm:h-20 object-contain"
               />
+              {formatRecordStreak(game.awayTeam.record, game.awayTeam.streak) && (
+                <span className="text-[9px] @sm:text-[10px] font-mono text-base-content/50 text-center">
+                  {formatRecordStreak(game.awayTeam.record, game.awayTeam.streak)}
+                </span>
+              )}
               <span className="text-xs @sm:text-sm font-medium text-base-content text-center">
                 {game.awayTeam.abbreviation}
               </span>
-              {favorite === "away" && spreadValue && (
-                <span className="text-[10px] @sm:text-xs text-base-content/50">{spreadValue}</span>
-              )}
               {game.completed && (
                 <span className="text-lg @sm:text-xl font-bold text-base-content tabular-nums">
                   {game.awayTeam.score}
@@ -120,17 +126,22 @@ export function GameViewCard({ game }: GameViewCardProps) {
             </>
           ) : (
             <>
+              {favorite === "home" && spreadValue && (
+                <span className="text-[10px] @sm:text-xs text-base-content/50">{spreadValue}</span>
+              )}
               <img
                 src={game.homeTeam.logo ?? ""}
                 alt={game.homeTeam.name}
                 className="w-14 h-14 @sm:w-20 @sm:h-20 object-contain"
               />
+              {formatRecordStreak(game.homeTeam.record, game.homeTeam.streak) && (
+                <span className="text-[9px] @sm:text-[10px] font-mono text-base-content/50 text-center">
+                  {formatRecordStreak(game.homeTeam.record, game.homeTeam.streak)}
+                </span>
+              )}
               <span className="text-xs @sm:text-sm font-medium text-base-content text-center">
                 {game.homeTeam.abbreviation}
               </span>
-              {favorite === "home" && spreadValue && (
-                <span className="text-[10px] @sm:text-xs text-base-content/50">{spreadValue}</span>
-              )}
               {game.completed && (
                 <span className="text-lg @sm:text-xl font-bold text-base-content tabular-nums">
                   {game.homeTeam.score}
