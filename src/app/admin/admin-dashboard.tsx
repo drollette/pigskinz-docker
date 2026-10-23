@@ -20,13 +20,14 @@ import {
 } from "lucide-react";
 import { triggerSyncNowAction, triggerResetSeasonAction } from "./actions";
 import { HomeMessageForm } from "./home-message-form";
+import { PrizePoolForm } from "./prize-pool-form";
 import { WeekResultsEmailForm } from "./week-results-email-form";
 import { AdminEmailForm } from "./admin-email-form";
 import { EmailTemplateManager, type EmailTemplateData } from "./email-template-manager";
 import { MissingPicksPanel } from "./missing-picks-panel";
 import { MissingTiebreakerPanel } from "./missing-tiebreaker-panel";
 import type { BroadcastRecipientMode } from "@/lib/admin-broadcast";
-import type { NextGameMissingPicks, CurrentWeekMissingTiebreaker } from "@/lib/data";
+import type { NextGameMissingPicks, CurrentWeekMissingTiebreaker, PrizePoolSettings } from "@/lib/data";
 
 interface Stats {
   users: number;
@@ -51,6 +52,7 @@ interface AdminDashboardProps {
   users: UserData[];
   environmentName: "staging" | "production";
   homeMessage: string;
+  prizePoolSettings: PrizePoolSettings;
   weekResultsEmailSubject: string;
   weekResultsEmailBody: string;
   nextGameMissingPicks: NextGameMissingPicks | null;
@@ -63,6 +65,7 @@ export function AdminDashboard({
   users: initialUsers,
   environmentName,
   homeMessage,
+  prizePoolSettings,
   weekResultsEmailSubject,
   weekResultsEmailBody,
   nextGameMissingPicks,
@@ -254,6 +257,18 @@ export function AdminDashboard({
         </div>
       </section>
 
+      {/* Prize Pool */}
+      <section>
+        <h2 className="text-xl font-semibold mb-4">Prize Pool</h2>
+        <p className="text-sm text-base-content/60 mb-4">
+          Per-player buy-in and payout split. The prize pot banner, Rules page, and welcome
+          email all compute their numbers from this (paid players × buy-in, divided by the
+          percentages below) -- changing it here updates all three. The toggle controls only
+          whether the banner itself shows.
+        </p>
+        <PrizePoolForm initial={prizePoolSettings} />
+      </section>
+
       {/* Home Page Message */}
       <section>
         <h2 className="text-xl font-semibold mb-4">Home Page Message</h2>
@@ -320,7 +335,7 @@ export function AdminDashboard({
       <section>
         <h2 className="text-xl font-semibold mb-4">Data Sync</h2>
         <p className="text-sm text-base-content/60 mb-4">
-          Schedule/score syncing fetches directly from ESPN every 15 minutes while a game is in
+          Schedule/score syncing fetches directly from ESPN every 5 minutes while a game is in
           progress. Use this to trigger it now.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

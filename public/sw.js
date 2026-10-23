@@ -22,7 +22,13 @@ self.addEventListener('install', (event) => {
     })
   );
 
-  // Don't wait for old SW to finish - activate immediately
+  // Activate a newly installed worker immediately rather than waiting for
+  // an explicit user confirmation -- a "click Update" toast turned out to
+  // be unreliable across multiple open tabs/PWA instances (the update
+  // could land on one client while the toast kept showing, stale, on
+  // another). pwa-provider.tsx's controllerchange handler still reloads
+  // each open tab once its own worker actually takes over, just without
+  // gating it on a click first.
   self.skipWaiting();
 });
 
@@ -131,13 +137,6 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => caches.match(request))
   );
-});
-
-// Listen for skip waiting message from client
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
 });
 
 // Push notifications -- payload is JSON built server-side (see

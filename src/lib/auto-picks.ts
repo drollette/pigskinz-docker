@@ -1,6 +1,6 @@
-import { and, eq, gt, lt, lte, inArray } from "drizzle-orm";
+import { and, eq, gt, lt, lte, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { games, picks, users, teams } from "../db/schema";
+import { games, picks, picksSummary, users, teams } from "../db/schema";
 import type { UserPreferences, AutoPickStrategy } from "../db/schema";
 import { generateId, favoredSide } from "./utils";
 import type { AppEnv } from "./env";
@@ -8,10 +8,13 @@ import { sendAutoPickEmail } from "./email";
 import { sendPushToUser } from "./push";
 import { isSameEasternDay, startOfEasternDayUTC } from "./pick-reminders";
 
-// Matches games kicking off in this window on the tick right before they'd
-// otherwise lock with no pick — same cadence as the production cron that
-// calls this (see worker.ts), so every eligible game gets exactly one
-// chance to be auto-picked before kickoff.
+// Games kicking off in this window get auto-picked on the tick that catches
+// them. Sized well above the production cron's 5-minute cadence (see
+// cron/index.ts) rather than matched exactly to it, so a tick that's late
+// or briefly down can't let a game slip through unpicked -- a game can
+// show up in this window across more than one tick, but the existing-pick
+// check below (and the insert's own try/catch) means only the first of
+// those actually inserts anything.
 const AUTO_PICK_WINDOW_MS = 15 * 60 * 1000;
 
 export interface AutoPickedGame {
@@ -27,6 +30,59 @@ export interface UpcomingAutoPickGame {
   gameId: string;
   name: string;
   shortName: string | null;
+}
+
+/**
+ * Keeps a user's picks_summary row (correctPicksCount/totalPicksCount) live
+ * the moment an auto-pick lands, mirroring syncPicksSummaryCountForUser in
+ * game-sync-core.ts -- that function can't be imported directly here since
+ * it uses "@/" alias imports, which don't resolve when tsx runs this file
+ * outside Next's bundler (see this file's own relative-imports-only rule,
+ * CLAUDE.md's "Path aliases" note). Without this, a user whose only picks
+ * for the week so far are auto-picks shows a stale/missing total on the
+ * live weekly standings table until a real game in that week completes and
+ * the full updateWeeklyStandings sweep catches it up.
+ */
+async function syncPicksSummaryCountForUser(
+  userId: string,
+  seasonType: number,
+  weekNumber: number
+): Promise<void> {
+  const [counts] = await db
+    .select({
+      correctCount: sql<number>`COUNT(CASE WHEN ${picks.isCorrect} = 1 THEN 1 END)`,
+      totalCount: sql<number>`COUNT(*)`,
+    })
+    .from(picks)
+    .where(and(eq(picks.userId, userId), eq(picks.seasonType, seasonType), eq(picks.weekNumber, weekNumber)));
+
+  const existingSummary = await db
+    .select()
+    .from(picksSummary)
+    .where(
+      and(
+        eq(picksSummary.userId, userId),
+        eq(picksSummary.seasonType, seasonType),
+        eq(picksSummary.weekNumber, weekNumber)
+      )
+    )
+    .limit(1);
+
+  if (existingSummary.length > 0) {
+    await db
+      .update(picksSummary)
+      .set({ correctPicksCount: counts.correctCount, totalPicksCount: counts.totalCount, updatedAt: new Date() })
+      .where(eq(picksSummary.id, existingSummary[0].id));
+  } else {
+    await db.insert(picksSummary).values({
+      id: generateId(),
+      userId,
+      seasonType,
+      weekNumber,
+      correctPicksCount: counts.correctCount,
+      totalPicksCount: counts.totalCount,
+    });
+  }
 }
 
 function resolveTeam(
@@ -189,6 +245,23 @@ export async function applyAutoPicks(env: AppEnv): Promise<void> {
   }
 
   if (pickedByUser.size === 0) return;
+
+  // Keep the live weekly standings table in sync for every user who just
+  // got an auto-pick, regardless of digest eligibility below -- a game
+  // kicking off "later today" is usually still this same (seasonType,
+  // weekNumber), but sync every distinct pair actually picked into just in
+  // case a tick straddles two weeks.
+  for (const [userId, entry] of pickedByUser) {
+    const weekKeys = new Set(entry.games.map((g) => `${g.seasonType}:${g.weekNumber}`));
+    for (const key of weekKeys) {
+      const [seasonType, weekNumber] = key.split(":").map(Number);
+      try {
+        await syncPicksSummaryCountForUser(userId, seasonType, weekNumber);
+      } catch (error) {
+        console.error(`Failed to sync picks_summary for user ${userId} after auto-pick:`, error);
+      }
+    }
+  }
 
   // Only the first auto-pick digest of the day goes out per channel — see
   // the doc comment above. Users who already got one today, who've opted

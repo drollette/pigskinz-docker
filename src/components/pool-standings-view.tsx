@@ -11,12 +11,13 @@ import {
   hasGameStarted,
 } from "@/lib/data";
 import { Card, CardBody, CardTitle } from "@/components/ui";
-import { getSeasonTypeName } from "@/lib/utils";
-import { HomeWeekNavigator } from "@/components/home-week-navigator";
+import { PoolStandingsHeader } from "@/components/pool-standings-header";
+import { WeekTransitionPanel } from "@/components/week-transition-panel";
 import { Leaderboard } from "@/components/leaderboard";
 import { ResultsGameList } from "@/components/results-game-list";
 import { CountdownTimer } from "@/components/countdown-timer";
 import { SeasonStandingsTable } from "@/components/season-standings-table";
+import { PlayerCompareTrigger } from "@/components/player-compare-trigger";
 import { withRetry } from "@/lib/with-retry";
 
 interface PoolStandingsViewProps {
@@ -85,20 +86,43 @@ export async function PoolStandingsView({ seasonType, weekNumber }: PoolStanding
     picksByGame[pick.gameId] = existing;
   }
 
+  // Same active-user roster the weekly standings table itself is built
+  // from -- who "should" have a pick for any given game this week, so
+  // ResultsGameCard can list who's missing one.
+  const allUsers = weeklyStandings.map((s) => ({
+    id: s.user.id,
+    name: s.user.name,
+    username: s.user.username,
+  }));
+
+  const seasonRoster = overallStandings.map((s) => ({
+    userId: s.userId,
+    userName: s.userName,
+    username: s.username,
+    avatar: s.avatar,
+  }));
+
   return (
     <div className="space-y-6">
       {firstGameDate && (
         <CountdownTimer targetDate={firstGameDate} label="Time until season kickoff" />
       )}
 
-      <HomeWeekNavigator currentWeek={resolvedWeek} currentSeasonType={resolvedSeasonType} />
+      <PoolStandingsHeader currentSeasonType={resolvedSeasonType} />
 
       {/* Season Standings */}
       <Card>
         <CardBody>
-          <CardTitle className="flex items-center gap-2 mb-4">
-            <Trophy className="w-5 h-5 text-yellow-500" />
-            {getSeasonTypeName(resolvedSeasonType)} Standings
+          <CardTitle className="flex items-center justify-between gap-2 mb-4">
+            {/* Not season-type-specific text -- the season itself is
+                already shown once, in the page header's dropdown above;
+                repeating it here too (e.g. "Regular Season") read as a
+                literal duplicate right below it. */}
+            <span className="flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-yellow-500" />
+              Overall
+            </span>
+            <PlayerCompareTrigger currentUserId={user.id} seasonType={resolvedSeasonType} roster={seasonRoster} />
           </CardTitle>
           <SeasonStandingsTable standings={overallStandings} currentUserId={user.id} />
         </CardBody>
@@ -106,37 +130,37 @@ export async function PoolStandingsView({ seasonType, weekNumber }: PoolStanding
 
       {/* Weekly leaderboard + per-game results */}
       <div className="flex flex-col items-center">
-        <div className="w-full max-w-3xl mb-6">
-          <h2 className="text-xl font-semibold text-base-content mb-3">
-            Week {resolvedWeek} Standings
-          </h2>
-          <Leaderboard
-            entries={leaderboardEntries}
-            showTiebreaker={tiebreakerGame !== null}
-            tiebreakerRevealed={tiebreakerStarted}
-          />
-        </div>
-
-        {games.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-xl text-base-content/70">
-              No games scheduled for this week.
-            </p>
-          </div>
-        ) : (
-          <>
-            <h2 className="text-xl font-semibold text-base-content mb-3 w-full max-w-3xl">
-              Picks by Game
-            </h2>
-            <ResultsGameList
-              games={games}
-              currentUserId={user.id}
-              picksByGame={picksByGame}
-              seasonType={resolvedSeasonType}
-              weekNumber={resolvedWeek}
+        <WeekTransitionPanel currentWeek={resolvedWeek} currentSeasonType={resolvedSeasonType}>
+          <div className="w-full max-w-3xl mb-6">
+            <Leaderboard
+              entries={leaderboardEntries}
+              showTiebreaker={tiebreakerGame !== null}
+              tiebreakerRevealed={tiebreakerStarted}
             />
-          </>
-        )}
+          </div>
+
+          {games.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-xl text-base-content/70">
+                No games scheduled for this week.
+              </p>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-xl font-semibold text-base-content mb-3 w-full max-w-3xl">
+                Picks by Game
+              </h2>
+              <ResultsGameList
+                games={games}
+                currentUserId={user.id}
+                picksByGame={picksByGame}
+                allUsers={allUsers}
+                seasonType={resolvedSeasonType}
+                weekNumber={resolvedWeek}
+              />
+            </>
+          )}
+        </WeekTransitionPanel>
       </div>
     </div>
   );

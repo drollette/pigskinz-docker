@@ -47,6 +47,7 @@ function hasGameChanged(
     date: Date;
     odds: string | null;
     overUnder: number | null;
+    network: string | null;
   }
 ): boolean {
   if (existing.homeTeamScore !== newData.homeTeamScore) return true;
@@ -55,6 +56,7 @@ function hasGameChanged(
   if (existing.statusName !== newData.statusName) return true;
   if (existing.odds !== newData.odds) return true;
   if (existing.overUnder !== newData.overUnder) return true;
+  if (existing.network !== newData.network) return true;
   const existingTime = existing.date.getTime();
   const newTime = newData.date.getTime();
   if (Math.abs(existingTime - newTime) > 60000) return true;
@@ -319,6 +321,15 @@ export async function syncEventsForWeek(
     const homeTeam = competition.competitors.find((c: ESPNEventPayload) => c.homeAway === "home");
     const awayTeam = competition.competitors.find((c: ESPNEventPayload) => c.homeAway === "away");
     const odds = competition.odds?.[0];
+    // "broadcasts" is the scoreboard endpoint's usual field (an array of
+    // {market, names: [...]}, national TV listed first); geoBroadcasts and a
+    // plain "broadcast" string are seen on some events (e.g. international
+    // games), so fall back through those rather than assuming one shape.
+    const network: string | null =
+      competition.broadcasts?.[0]?.names?.join("/") ??
+      competition.geoBroadcasts?.[0]?.media?.shortName ??
+      competition.broadcast ??
+      null;
 
     const gameDate = new Date(event.date);
     const gameData = {
@@ -336,6 +347,7 @@ export async function syncEventsForWeek(
       statusName: event.status?.type?.name ?? "STATUS_SCHEDULED",
       odds: odds?.details ?? null,
       overUnder: odds?.overUnder ?? null,
+      network,
     };
 
     // Postseason games are often published as placeholders before playoff
@@ -361,6 +373,19 @@ export async function syncEventsForWeek(
     const existing = await db.select().from(schema.games).where(eq(schema.games.id, event.id)).limit(1);
     const existingGame = existing[0];
     const wasCompleted = existingGame?.completed ?? false;
+
+    // ESPN stops including a betting line once a game goes live or final
+    // (sportsbooks pull it) -- keep whatever spread/over-under we last saw
+    // rather than overwriting it with null the moment betting closes, so
+    // the favorite still displays on in-progress/completed games.
+    if (existingGame) {
+      if (gameData.odds === null && existingGame.odds !== null) {
+        gameData.odds = existingGame.odds;
+      }
+      if (gameData.overUnder === null && existingGame.overUnder !== null) {
+        gameData.overUnder = existingGame.overUnder;
+      }
+    }
 
     if (existingGame) {
       if (wasCompleted && gameData.completed) {

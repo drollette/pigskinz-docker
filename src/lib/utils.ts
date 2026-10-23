@@ -23,6 +23,17 @@ export function favoredSide(
   return null;
 }
 
+/** Formats a team's record + streak for display next to its logo, e.g.
+ * "(6-7-0/W3)". Returns null before the team has completed a
+ * regular-season game (record is "0-0-0", streak is "-"). */
+export function formatRecordStreak(
+  record: string | null | undefined,
+  streak: string | null | undefined
+): string | null {
+  if (!record || !streak || streak === "-") return null;
+  return `(${record}/${streak})`;
+}
+
 export function getTeamLogoUrl(abbreviation: string, logoFromApi?: string): string {
   // Use ESPN CDN for logos - external source to avoid hosting copyrighted content
   return logoFromApi || `https://a.espncdn.com/i/teamlogos/nfl/500/${abbreviation.toLowerCase()}.png`;

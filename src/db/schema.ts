@@ -49,6 +49,13 @@ export type UserPreferences = {
     weekResults?: boolean;
     autoPickDigest?: boolean;
   };
+  // What the picks form shows alongside each matchup. Both default to true
+  // when unset (opt-out), so nothing changes for a user until they choose
+  // to hide something -- some players find the numbers sway their picks.
+  picksDisplay?: {
+    showStats?: boolean; // team record + streak, e.g. "(6-7-0/W3)"
+    showOdds?: boolean; // favorite's spread and over/under
+  };
   // Which panel occupies each of ContentShell's two side columns, last set
   // by the user via the picker in each column's header. Only ever read
   // through resolveSidePanels (src/lib/side-panels.ts), which falls back to
@@ -164,6 +171,9 @@ export const games = sqliteTable("games", {
   statusName: text("status_name").default("STATUS_SCHEDULED"),
   odds: text("odds"),
   overUnder: real("over_under"),
+  // Broadcasting network(s), e.g. "CBS" or "NBC/Peacock" -- shown on the
+  // schedule page only (see src/lib/data.ts GameData.network).
+  network: text("network"),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
     () => new Date()
   ),
@@ -437,6 +447,26 @@ export const siteSettings = sqliteTable("site_settings", {
   // resolved into weekResultsEmailBody at send time.
   weekResultsEmailSubject: text("week_results_email_subject"),
   weekResultsEmailBody: text("week_results_email_body"),
+  // Admin-editable season buy-in, in whole dollars -- drives the prize pot
+  // banner (src/lib/prize-pool.ts), the Rules page, and the welcome email,
+  // all of which used to each hardcode a fixed amount independently.
+  // Nullable so a fresh/never-configured environment has an explicit
+  // "unset" state; callers fall back to DEFAULT_BUY_IN_DOLLARS rather than
+  // treating null as a $0 buy-in.
+  buyInDollars: integer("buy_in_dollars"),
+  // Whole percentages of the pot paid to each place -- admin-editable
+  // alongside buyInDollars, same nullable/fallback convention (see
+  // DEFAULT_PRIZE_SPLIT in prize-pool.ts). Not DB-constrained to sum to
+  // 100; updatePrizePoolSettingsAction enforces that on write.
+  prizeFirstPercent: integer("prize_first_percent"),
+  prizeSecondPercent: integer("prize_second_percent"),
+  prizeThirdPercent: integer("prize_third_percent"),
+  // Admin kill switch for the prize pot banner (src/components/prize-pot-banner.tsx)
+  // -- independent of the banner's own "hide until someone's paid" check,
+  // for a pool that doesn't want the pot published at all. Nullable,
+  // defaults to shown (true) when unset, same convention as the rest of
+  // this table.
+  prizeBarEnabled: integer("prize_bar_enabled", { mode: "boolean" }),
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
     () => new Date()
   ),
@@ -444,7 +474,7 @@ export const siteSettings = sqliteTable("site_settings", {
 
 // One row per (seasonType, weekNumber) that's already had its automated
 // week-results email sent (see src/lib/week-results-email.ts) -- exists
-// purely so the 15-minute cron tick that looks for newly-completed weeks
+// purely so the 5-minute cron tick that looks for newly-completed weeks
 // (picks_summary.rank just went non-null) doesn't re-send every tick.
 // Backfilled for every already-complete week as of the migration that
 // created this table, so turning the feature on doesn't retroactively

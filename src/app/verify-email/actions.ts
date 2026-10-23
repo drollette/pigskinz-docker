@@ -5,6 +5,7 @@ import { emailVerificationCodes, users } from "@/db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { createSession } from "@/lib/auth";
 import { sendWelcomeEmail } from "@/lib/email";
+import { getPrizePoolSettings } from "@/lib/data";
 import { z } from "zod";
 
 const verifyCodeSchema = z.object({
@@ -81,7 +82,13 @@ export async function verifyEmailAction(formData: FormData) {
       .limit(1);
 
     if (userResult[0]) {
-      await sendWelcomeEmail(verificationCode.email, userResult[0].name);
+      const prizePoolSettings = await getPrizePoolSettings();
+      await sendWelcomeEmail(
+        verificationCode.email,
+        userResult[0].name,
+        prizePoolSettings.buyInDollars,
+        prizePoolSettings.split
+      );
     }
   } catch (error) {
     console.error("Failed to send welcome email:", error);

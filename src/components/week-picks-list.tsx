@@ -1,7 +1,7 @@
 import { GameScheduleCard } from "@/components/game-schedule-card";
 import { TiebreakerCard } from "@/components/tiebreaker-card";
 import type { getWeekPicksData } from "@/lib/week-picks";
-import type { User } from "@/db/schema";
+import type { User, UserPreferences } from "@/db/schema";
 
 interface WeekPicksListProps {
   user: User;
@@ -24,6 +24,10 @@ export function WeekPicksList({ user, weekNumber, seasonType, data }: WeekPicksL
     tiebreakerRevealed,
     userPicks,
   } = data;
+
+  const picksDisplay = (user.preferences as UserPreferences | null)?.picksDisplay;
+  const showStats = picksDisplay?.showStats ?? true;
+  const showOdds = picksDisplay?.showOdds ?? true;
 
   if (games.length === 0) {
     return (
@@ -57,6 +61,8 @@ export function WeekPicksList({ user, weekNumber, seasonType, data }: WeekPicksL
           userName={user.name}
           weekNumber={weekNumber}
           seasonType={seasonType}
+          showStats={showStats}
+          showOdds={showOdds}
         />
       ))}
 

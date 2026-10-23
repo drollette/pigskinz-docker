@@ -63,7 +63,7 @@ export interface WeekResultsRecipient {
  * game that week has completed -- plus every emailVerified, active user.
  * Both sendWeekResultsEmails and sendWeekResultsPush need this same pair
  * every tick; shared here (and passed down from src/cron/index.ts) so it's
- * only queried once rather than twice, every 15 minutes, all season.
+ * only queried once rather than twice, every 5 minutes, all season.
  */
 export async function getWeekResultsCandidates(): Promise<{
   candidateWeeks: CandidateWeek[];
@@ -85,7 +85,7 @@ export async function getWeekResultsCandidates(): Promise<{
 /**
  * Sends the results email for every newly-finalized week that hasn't had
  * one sent yet, using the admin-editable site_settings template. Runs on
- * the same 15-minute cron tick as the ESPN sync gate, auto-picks, and pick
+ * the same 5-minute cron tick as the ESPN sync gate, auto-picks, and pick
  * reminders (see src/cron/index.ts); no separate schedule needed since this
  * is just as cheap a database read as those.
  *

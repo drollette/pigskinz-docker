@@ -59,11 +59,26 @@ directly: `src/lib/espn-client.ts` does the fetch, `src/lib/sync-runner.ts` hand
 writes), all in-process. There is no external relay, no shared secret, and nothing to configure in
 GitHub Actions for basic operation.
 
-`src/cron/index.ts`'s 15-minute tick calls `runEspnSync` directly whenever a game looks like it's in
+`src/cron/index.ts`'s 5-minute tick calls `runEspnSync` directly whenever a game looks like it's in
 progress (a cheap database read, `hasGameInProgress`); the admin dashboard's "Sync Now" and "Season
 Rollover" buttons (`src/app/admin/actions.ts` → `runEspnSync`/`runSeasonRollover`) call the same
 functions synchronously and wait for them to finish, rather than dispatching a workflow and returning
 immediately.
+
+The Cloudflare original splits its equivalent cron into two schedules (every 5 minutes on Sunday, every
+15 the rest of the week) specifically to ration GitHub Actions minutes, since its `sync-espn.yml`
+dispatch is billed per invocation — a concern that doesn't exist here, since ESPN is fetched in-process
+with no dispatched workflow at all. A single 5-minute cadence every day is simpler and gives every day
+Sunday-grade freshness, not just Sunday; `AUTO_PICK_WINDOW_MS` in `auto-picks.ts` stays at 15 minutes
+regardless (safely above the cadence, not matched to it) so a tick that's briefly late or down can't let
+a game slip through unpicked.
+
+`runEspnSync` also broadcasts a `game_update` message (via `src/realtime/locker-room.ts`'s `broadcast`)
+whenever a sync actually changes or adds a game, so any open tab on that week's results view
+(`results-game-list.tsx`'s `useWebSocket`) refreshes instantly instead of waiting out its own polling
+fallback — the Cloudflare original needs a separate code path for this (its cron handler can't reach the
+`GameRoom` Durable Object directly, only a Next.js request can), but here `runEspnSync` runs in-process
+either way, so one broadcast call covers both the cron tick and the admin "Sync Now" button.
 
 ## Web Push notifications
 
@@ -90,6 +105,15 @@ generator produces) prints `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` to put in `.en
 the "Push" toggle in Settings just fails to subscribe (the browser rejects an empty
 `applicationServerKey`) while email notifications keep working normally.
 
+The actual browser subscription stayed opt-in even after preferences defaulted to on, since most users
+never visited `/my/settings` to click "Enable" — `src/components/push-permission-banner.tsx` nudges for
+it app-wide instead, shown once to a signed-in, verified user with no existing `push_subscriptions` row
+on a supported browser/platform (gated server-side in `layout.tsx`, dismissal remembered in
+`localStorage`). Deliberately not an automatic `Notification.requestPermission()` call on load — Chrome
+and others downrank or auto-suppress a permission prompt fired without a prior user gesture, and a
+reflexive dismissal of an unprompted dialog can permanently block the origin from asking again — so the
+banner's own Enable button supplies that gesture first.
+
 ## No personal data, no hardcoded secrets — this repo is open source
 
 Every operator-specific value (pool name, site URL, sender email, any real-money buy-in link) is read
@@ -99,6 +123,18 @@ add an env var with a sensible default instead, the way `POOL_NAME`/`SITE_URL`/`
 There are also no GitHub Actions secrets to configure for basic operation (see "ESPN is fetched
 directly" above) — don't reintroduce that coupling without a good reason. Never commit `.env`,
 `secrets/rclone.conf`, or a populated SQLite file.
+
+The season buy-in amount and 1st/2nd/3rd payout split are the one exception to "env var with a generic
+default" — they're admin-editable at runtime instead (`site_settings.buyInDollars`/`prize*Percent`, the
+admin dashboard's "Prize Pool" section, `src/lib/prize-pool.ts` for the fallback defaults and pot math).
+This replaced an earlier env-var-only design (`BUYIN_AMOUNT`/`PAYOUT_INFO`, now gone from
+`site-config.ts`) once the Cloudflare original added a live prize-pot banner computed from real paid-user
+counts — a plain env var can't update itself as players pay their buy-in, so this needed a real settings
+UI instead. `LEAGUESAFE_URL`/`BUYIN_DEADLINE` are still env vars: they're "where/when to pay," a
+deploy-time link only the operator knows, not something the pot math itself needs to compute.
+`DEFAULT_BUY_IN_DOLLARS`/`DEFAULT_PRIZE_SPLIT` in `prize-pool.ts` are plain generic fallbacks (not tied
+to any real pool), same as `POOL_NAME` defaulting to `"Pigskinz"` — immediately admin-editable from the
+dashboard, not a hardcoded real-money detail.
 
 ## Database
 
@@ -116,6 +152,14 @@ directly" above) — don't reintroduce that coupling without a good reason. Neve
   undetermined postseason matchup with a real-but-placeholder team (abbreviation `TBD`, or the
   `AFC`/`NFC` conference pseudo-teams) rather than omitting the team entirely —
   `PLACEHOLDER_TEAM_ABBREVIATIONS` in `game-sync-core.ts` needs to keep excluding these.
+- The Cloudflare original caches a completed week's `getGamesForWeek`/`getWeeklyStandings`/
+  `getAllPicksForWeek`/`getTiebreakerGame` results via `unstable_cache`, backed by an R2 bucket (needed
+  because a stateless Workers isolate has nothing else to persist a cache across requests). That whole
+  layer is deliberately **not** ported here: it exists purely to cut down on D1 reads, which are
+  metered and network-bound; a local SQLite file on the same machine has neither problem, so the cache
+  would add real complexity (JSON-round-trip Date handling, a "never invalidate once complete" bet) for
+  no measurable benefit. If a real performance need shows up later, reach for Next's default in-memory
+  cache handler directly rather than re-introducing the R2-shaped version of this.
 
 ## Package manager & commands
 

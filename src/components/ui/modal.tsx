@@ -8,9 +8,13 @@ interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  /** Extra classes on the visible box itself (e.g. a wider max-width for
+   * content-heavy modals) -- `className` alone only reaches the outer
+   * `<dialog>`, which daisyUI doesn't size the box from. */
+  boxClassName?: string;
 }
 
-export function Modal({ open, onClose, children, className }: ModalProps) {
+export function Modal({ open, onClose, children, className, boxClassName }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -26,7 +30,7 @@ export function Modal({ open, onClose, children, className }: ModalProps) {
 
   return (
     <dialog ref={dialogRef} className={cn("modal", className)} onClose={onClose}>
-      <div className="modal-box">
+      <div className={cn("modal-box", boxClassName)}>
         {children}
       </div>
       <form method="dialog" className="modal-backdrop">

@@ -19,6 +19,9 @@ interface GameScheduleCardProps {
   userName?: string;
   weekNumber: number;
   seasonType: number;
+  /** User's picks-display preferences (Settings > Picks Display). */
+  showStats?: boolean;
+  showOdds?: boolean;
 }
 
 // Check if a team is TBD (to be determined)
@@ -37,6 +40,8 @@ export function GameScheduleCard({
   userName,
   weekNumber,
   seasonType,
+  showStats = true,
+  showOdds = true,
 }: GameScheduleCardProps) {
   const [isPending, startTransition] = useTransition();
   const [selectedTeam, setSelectedTeam] = useState<string | null>(userPick ?? null);
@@ -152,7 +157,8 @@ export function GameScheduleCard({
           userAvatar={selectedTeam === game.awayTeam.id ? userAvatar : undefined}
           userName={selectedTeam === game.awayTeam.id ? userName : undefined}
           userPickCorrect={userPickCorrect}
-          spread={favorite === "away" ? spreadValue : null}
+          spread={showOdds && favorite === "away" ? spreadValue : null}
+          showStats={showStats}
         />
 
         {/* VS indicator + over/under -- the spread itself renders under the
@@ -161,12 +167,12 @@ export function GameScheduleCard({
           <span className={cn(blackOpsOne.className, "text-base-content/50 leading-none text-4xl @sm:text-6xl")}>
             @
           </span>
-          {game.overUnder && (
+          {showOdds && game.overUnder && (
             <span className="text-[10px] @sm:text-xs text-base-content/50 whitespace-nowrap">
               O/U: {game.overUnder}
             </span>
           )}
-          {!favorite && game.odds !== "Odds Not Available" && (
+          {showOdds && !favorite && game.odds !== "Odds Not Available" && (
             <span className="text-[10px] @sm:text-xs text-base-content/50 whitespace-nowrap">
               {game.odds}
             </span>
@@ -183,7 +189,8 @@ export function GameScheduleCard({
           userAvatar={selectedTeam === game.homeTeam.id ? userAvatar : undefined}
           userName={selectedTeam === game.homeTeam.id ? userName : undefined}
           userPickCorrect={userPickCorrect}
-          spread={favorite === "home" ? spreadValue : null}
+          spread={showOdds && favorite === "home" ? spreadValue : null}
+          showStats={showStats}
         />
       </div>
 

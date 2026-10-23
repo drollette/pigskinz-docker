@@ -5,6 +5,7 @@ import { users, teams, games, picks, emailTemplates } from "@/db/schema";
 import { count, desc } from "drizzle-orm";
 import {
   getHomeMessage,
+  getPrizePoolSettings,
   getWeekResultsEmailTemplate,
   getNextGameMissingPicks,
   getCurrentWeekMissingTiebreaker,
@@ -32,6 +33,7 @@ export default async function AdminPage() {
     pickCount,
     allUsers,
     homeMessage,
+    prizePoolSettings,
     weekResultsEmailTemplate,
     nextGameMissingPicks,
     missingTiebreaker,
@@ -52,6 +54,7 @@ export default async function AdminPage() {
       createdAt: users.createdAt,
     }).from(users),
     getHomeMessage(),
+    getPrizePoolSettings(),
     getWeekResultsEmailTemplate(),
     getNextGameMissingPicks(),
     getCurrentWeekMissingTiebreaker(),
@@ -83,6 +86,7 @@ export default async function AdminPage() {
         users={allUsers}
         environmentName={environmentName}
         homeMessage={homeMessage ?? ""}
+        prizePoolSettings={prizePoolSettings}
         weekResultsEmailSubject={weekResultsEmailTemplate?.subject ?? ""}
         weekResultsEmailBody={weekResultsEmailTemplate?.body ?? ""}
         nextGameMissingPicks={nextGameMissingPicks}

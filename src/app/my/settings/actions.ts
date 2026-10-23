@@ -23,6 +23,7 @@ import {
 } from "@/lib/email";
 import { z } from "zod";
 import { headers } from "next/headers";
+import { revalidatePath } from "next/cache";
 import type { UserPreferences } from "@/db/schema";
 
 const VERIFICATION_CODE_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
@@ -393,6 +394,55 @@ export async function updateAutoPickAction(
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
+
+    return { success: true };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Update failed",
+    };
+  }
+}
+
+const picksDisplaySchema = z.object({
+  showStats: z.boolean(),
+  showOdds: z.boolean(),
+});
+
+type UpdatePicksDisplayResult = { error: string } | { success: true };
+
+export async function updatePicksDisplayAction(
+  showStats: boolean,
+  showOdds: boolean
+): Promise<UpdatePicksDisplayResult> {
+  const user = await requireAuth();
+
+  const parsed = picksDisplaySchema.safeParse({ showStats, showOdds });
+  if (!parsed.success) {
+    return { error: "Invalid picks display settings" };
+  }
+
+  const db = getDb();
+
+  try {
+    const currentPreferences = (user.preferences ?? {}) as UserPreferences;
+    const newPreferences: UserPreferences = {
+      ...currentPreferences,
+      picksDisplay: parsed.data,
+    };
+
+    await db
+      .update(users)
+      .set({
+        preferences: newPreferences,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+
+    // The picks form renders on more than one route (the Picks page and the
+    // Home side panel), and the client router keeps dynamic pages cached for
+    // a while -- purge it so the change shows up on the very next
+    // navigation rather than being stuck on stale cached data.
+    revalidatePath("/", "layout");
 
     return { success: true };
   } catch (error) {

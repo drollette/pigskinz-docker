@@ -1,15 +1,20 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
+import { getPrizePoolSettings } from "@/lib/data";
 import { Card, CardBody, CardTitle } from "@/components/ui";
 import { ShareButton } from "@/components/share-button";
 import { LeagueSafeLink } from "@/components/leaguesafe-link";
 import { ListChecks, Calculator, Target, DollarSign } from "lucide-react";
-import { LEAGUESAFE_URL, BUYIN_AMOUNT, BUYIN_DEADLINE, PAYOUT_INFO } from "@/lib/site-config";
+import { LEAGUESAFE_URL, BUYIN_DEADLINE } from "@/lib/site-config";
 
 /** The static "How to Play" content -- offered as one of a column's
  * selectable views, and the only one available to a signed-out visitor. */
 export async function RulesView() {
-  const user = await getCurrentUser().catch(() => null);
+  const [user, prizePoolSettings] = await Promise.all([
+    getCurrentUser().catch(() => null),
+    getPrizePoolSettings(),
+  ]);
+  const { buyInDollars, split } = prizePoolSettings;
 
   return (
     <div className="space-y-6">
@@ -93,7 +98,7 @@ export async function RulesView() {
             </CardTitle>
             <ul className="space-y-1.5 text-base-content/80 text-sm @sm:text-base list-disc pl-5">
               <li>
-                {BUYIN_AMOUNT ? `${BUYIN_AMOUNT} for the season, collected` : "Collected"} through{" "}
+                ${buyInDollars} for the season, collected through{" "}
                 <strong>LeagueSafe</strong> — the top-rated, trusted platform for fantasy sports
                 pools since 2008.
               </li>
@@ -106,7 +111,9 @@ export async function RulesView() {
                   payments after the deadline, so don&apos;t wait until the last minute.
                 </li>
               )}
-              <li>{PAYOUT_INFO}</li>
+              <li>1st place: {split.first}% of the pot.</li>
+              <li>2nd place: {split.second}% of the pot.</li>
+              <li>3rd place: {split.third}% of the pot.</li>
               <li>Payouts are based on final season standings (total points).</li>
             </ul>
           </CardBody>

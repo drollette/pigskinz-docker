@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, favoredSide, formatRecordStreak } from "@/lib/utils";
 import { formatGameDate, formatGameTime } from "@/lib/utils";
 import { Eye, EyeOff, Check, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
@@ -16,10 +16,17 @@ interface PickInfo {
   isCorrect: boolean | null;
 }
 
+interface RosterUser {
+  id: string;
+  name: string;
+  username: string | null;
+}
+
 interface ResultsGameCardProps {
   game: GameData;
   currentUserId: string;
   picks: PickInfo[];
+  allUsers: RosterUser[];
   hasGameStarted: boolean;
 }
 
@@ -27,6 +34,7 @@ export function ResultsGameCard({
   game,
   currentUserId,
   picks,
+  allUsers,
   hasGameStarted,
 }: ResultsGameCardProps) {
   const gameDate = new Date(game.date);
@@ -40,6 +48,18 @@ export function ResultsGameCard({
 
   // Determine if we should show picks (game has started or completed)
   const showAllPicks = hasGameStarted || game.completed;
+
+  // Same "spread shown under whichever team it favors" treatment as
+  // game-view-card.tsx's picks page -- players asked to see the favorite
+  // here too rather than having to cross-reference the picks page.
+  const favorite = favoredSide(game.odds, game.homeTeam.abbreviation, game.awayTeam.abbreviation);
+  const spreadValue = game.odds?.trim().replace(/^\S+\s*/, "") || null;
+
+  // Same reveal timing as everyone else's picks -- showing who's missing
+  // one pre-kickoff would leak other players' pick status earlier than the
+  // rest of this card already allows.
+  const pickedUserIds = new Set(picks.map((p) => p.userId));
+  const missingUsers = showAllPicks ? allUsers.filter((u) => !pickedUserIds.has(u.id)) : [];
 
   const logoUrl = (team: { abbreviation: string; logo?: string | null }) =>
     team.logo || `https://a.espncdn.com/i/teamlogos/nfl/500/${team.abbreviation.toLowerCase()}.png`;
@@ -118,12 +138,22 @@ export function ResultsGameCard({
         {/* Away Team Picks */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={logoUrl(game.awayTeam)}
-              alt={game.awayTeam.abbreviation}
-              className="w-6 h-6 object-contain"
-            />
+            <div className="flex flex-col items-center shrink-0">
+              {favorite === "away" && spreadValue && (
+                <span className="text-[9px] leading-none text-base-content/50">{spreadValue}</span>
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoUrl(game.awayTeam)}
+                alt={game.awayTeam.abbreviation}
+                className="w-6 h-6 object-contain"
+              />
+              {formatRecordStreak(game.awayTeam.record, game.awayTeam.streak) && (
+                <span className="text-[8px] leading-none font-mono text-base-content/50 whitespace-nowrap">
+                  {formatRecordStreak(game.awayTeam.record, game.awayTeam.streak)}
+                </span>
+              )}
+            </div>
             <span className="font-medium text-sm">{game.awayTeam.abbreviation}</span>
             {showAllPicks && (
               <span className="text-xs text-base-content/50">({awayTeamPicks.length})</span>
@@ -164,12 +194,22 @@ export function ResultsGameCard({
         {/* Home Team Picks */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={logoUrl(game.homeTeam)}
-              alt={game.homeTeam.abbreviation}
-              className="w-6 h-6 object-contain"
-            />
+            <div className="flex flex-col items-center shrink-0">
+              {favorite === "home" && spreadValue && (
+                <span className="text-[9px] leading-none text-base-content/50">{spreadValue}</span>
+              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoUrl(game.homeTeam)}
+                alt={game.homeTeam.abbreviation}
+                className="w-6 h-6 object-contain"
+              />
+              {formatRecordStreak(game.homeTeam.record, game.homeTeam.streak) && (
+                <span className="text-[8px] leading-none font-mono text-base-content/50 whitespace-nowrap">
+                  {formatRecordStreak(game.homeTeam.record, game.homeTeam.streak)}
+                </span>
+              )}
+            </div>
             <span className="font-medium text-sm">{game.homeTeam.abbreviation}</span>
             {showAllPicks && (
               <span className="text-xs text-base-content/50">({homeTeamPicks.length})</span>
@@ -207,6 +247,18 @@ export function ResultsGameCard({
           </div>
         </div>
       </div>
+
+      {/* Players with no pick for this game -- spans both columns above */}
+      {missingUsers.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-base-200">
+          <span className="text-xs text-base-content/50 self-center mr-0.5">No pick:</span>
+          {missingUsers.map((u) => (
+            <span key={u.id} className="badge badge-ghost badge-xs">
+              {u.username || u.name}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Current user's pick indicator if game hasn't started */}
       {!showAllPicks && !currentUserPick && (

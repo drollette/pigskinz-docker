@@ -156,3 +156,37 @@ h1, h2 {
 button:focus-visible {
   @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-base-100;
 }
+
+/* Pool standings' week navigation (WeekTransitionPanel) -- a subtle
+   slide+fade in the direction navigated, rather than a full off-canvas
+   carousel track, since the content's height varies with the week (games
+   played, picks made) and isn't in a fixed-size clipped container. */
+@keyframes week-slide-from-left {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes week-slide-from-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-week-slide-from-left {
+  animation: week-slide-from-left 0.25s ease-out;
+}
+
+.animate-week-slide-from-right {
+  animation: week-slide-from-right 0.25s ease-out;
+}

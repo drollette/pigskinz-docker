@@ -23,9 +23,9 @@ export const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME ?? POOL_NAME;
 
 // Optional real-money buy-in collection, e.g. a LeagueSafe group link. Left
 // unset by default -- the UI and welcome email skip this section entirely
-// unless a deployment configures its own.
+// unless a deployment configures its own. The buy-in amount and payout
+// split themselves are admin-editable at runtime instead of env vars --
+// see getPrizePoolSettings in data.ts and prize-pool.ts -- since a plain
+// env var can't reflect a live pot computed from who's actually paid.
 export const LEAGUESAFE_URL = process.env.NEXT_PUBLIC_LEAGUESAFE_URL ?? "";
-export const BUYIN_AMOUNT = process.env.NEXT_PUBLIC_BUYIN_AMOUNT ?? "";
 export const BUYIN_DEADLINE = process.env.NEXT_PUBLIC_BUYIN_DEADLINE ?? "";
-export const PAYOUT_INFO =
-  process.env.NEXT_PUBLIC_PAYOUT_INFO ?? "Ask your pool organizer how this season's payouts are split.";

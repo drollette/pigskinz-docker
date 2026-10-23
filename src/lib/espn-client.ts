@@ -55,7 +55,7 @@ export async function fetchCurrentAndAdjacentWeeks(): Promise<ScoreboardWeek[]> 
 }
 
 /** Every week of every season type for one calendar year -- used for the
- * once-a-year season rollover, not the regular 15-minute sync. */
+ * once-a-year season rollover, not the regular 5-minute sync. */
 export async function fetchFullSeasonWeeks(seasonYear: number): Promise<ScoreboardWeek[]> {
   const weeks: ScoreboardWeek[] = [];
 
