@@ -41,8 +41,16 @@ function LoginForm() {
       }
     } else {
       toast.success("Welcome back!");
-      router.push(redirectUrl);
-      router.refresh();
+      // A real browser navigation, not router.push()+router.refresh() --
+      // the two fired back-to-back raced each other (push's own fetch could
+      // win using router-cache state from before this action's
+      // revalidatePath("/", "layout") was applied), which is why users have
+      // intermittently landed on what looks like a logged-out home page
+      // right after a successful login, only fixed by a manual reload.
+      // window.location.href forces a full document load that always reads
+      // the just-set session cookie fresh from the server, no client
+      // router cache involved at all.
+      window.location.href = redirectUrl;
     }
   };
 

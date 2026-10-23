@@ -53,8 +53,11 @@ function VerifyEmailForm() {
       setIsLoading(false);
     } else {
       toast.success("Email verified successfully!");
-      router.push(redirectUrl);
-      router.refresh();
+      // See the matching comment in src/app/login/page.tsx -- a real
+      // browser navigation, not router.push()+router.refresh(), so the
+      // freshly-created session cookie is guaranteed to be picked up
+      // without a race against the client router cache.
+      window.location.href = redirectUrl;
     }
   };
 

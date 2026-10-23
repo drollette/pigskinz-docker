@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { Button, Input, Card, CardBody, CardTitle } from "@/components/ui";
@@ -9,7 +9,6 @@ import { resetPasswordAction, validateResetToken } from "./actions";
 import { CheckCircle, XCircle } from "lucide-react";
 
 function ResetPasswordForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [isValidating, setIsValidating] = useState(true);
@@ -111,7 +110,14 @@ function ResetPasswordForm() {
             <Button
               variant="primary"
               className="w-full"
-              onClick={() => router.push("/")}
+              onClick={() => {
+                // See the matching comment in src/app/login/page.tsx -- a
+                // real browser navigation, not router.push(), so the
+                // session cookie resetPasswordAction just created is
+                // guaranteed to be picked up without a race against the
+                // client router cache.
+                window.location.href = "/";
+              }}
             >
               Go to Dashboard
             </Button>
